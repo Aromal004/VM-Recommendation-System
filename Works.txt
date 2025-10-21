@@ -1,0 +1,35 @@
+
+CoreMark per core
+CoreMark per dollar
+$/vCPU-hour
+Throughput (TPS/QPS)-transaction per sec and queries per sec
+Memory utilization & bandwidth
+Cache performance (hit/miss rates)
+VM startup time
+Resource saturation point - identifies limits where scaling is needed.
+
+
+
+CoreMark per core → raw compute efficiency.
+
+CoreMark per dollar → performance-to-cost baseline.
+
+$/vCPU-hour → key cost unit for comparison.
+
+Latency (average + tail p95/p99) → critical for real-world workloads.
+
+Throughput (TPS/QPS) → measures sustained workload capacity.
+
+Memory utilization & bandwidth → important for memory-intensive workloads.
+
+Network bandwidth (Gbps) → necessary for data-intensive applications.
+
+IOPS (storage performance) → especially for database or disk-heavy tasks.
+
+Cache performance (hit/miss rates) → useful when analyzing CPU differences (Intel vs AMD vs ARM).
+
+$/GB-hour (RAM cost) → helps for memory-optimized VM families.
+
+Resource saturation point → identifies limits where scaling is needed.
+
+VM startup time → relevant for serverless or ephemeral workloads.
