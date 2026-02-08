@@ -14,7 +14,7 @@ df = pd.read_csv("C:/Users/USER/Desktop/Final Project/AWS/aws_ec2_full_dataset.c
 df = df[df["price_per_hr"] > 0]
 
 # USER INPUT
-workload = "cpu_intensive"
+workload = "network_intensive"
 
 # Feature engineering first (to get numeric memory/network)
 df = add_features(df)
@@ -50,5 +50,5 @@ print("\n🏆 Top EC2 Recommendations")
 print(
     ranked[
         ["instanceType", "vcpu", "memory", "networkPerformance", "price_per_hr", "final_score"]
-    ].head(5)
+    ].head(250)
 )

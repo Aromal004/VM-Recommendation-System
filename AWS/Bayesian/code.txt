@@ -1,0 +1,176 @@
+//config/workload_constraint.py
+WORKLOAD_CONSTRAINTS = {
+    "cpu_intensive": {
+        "min_vcpu": 8,
+        "min_memory": 16
+    },
+    "memory_intensive": {
+        "min_vcpu": 4,
+        "min_memory": 64
+    },
+    "network_intensive": {
+        "min_network": 10000  # Mbps
+    },
+    "balanced": {
+        "min_vcpu": 4,
+        "min_memory": 16,
+        "min_network": 5000
+    }
+}
+
+
+//optimization/bayesian_optimizer.py
+
+from skopt import gp_minimize
+from skopt.space import Real
+
+def optimize_weights(df, scorer_fn, top_k=5, n_calls=30):
+
+    space = [
+        Real(0.01, 1.0, name="compute"),
+        Real(0.01, 1.0, name="memory"),
+        Real(0.01, 1.0, name="network"),
+        Real(0.01, 1.0, name="cost"),
+    ]
+
+    def objective(params):
+        weights = dict(zip(["compute", "memory", "network", "cost"], params))
+
+        # Normalize weights
+        s = sum(weights.values())
+        weights = {k: v / s for k, v in weights.items()}
+
+        ranked = scorer_fn(df.copy(), weights)
+        score = ranked.head(top_k)["final_score"].mean()
+
+        # Minimize negative score
+        return -score
+
+    result = gp_minimize(
+        objective,
+        space,
+        n_calls=n_calls,
+        random_state=42
+    )
+
+    best_weights = dict(zip(["compute", "memory", "network", "cost"], result.x))
+    s = sum(best_weights.values())
+    best_weights = {k: v / s for k, v in best_weights.items()}
+
+    return best_weights
+
+
+//preprocessing/feature_engineering.py
+import pandas as pd
+import re
+
+def parse_network(network_str):
+    if pd.isna(network_str):
+        return 0.0
+
+    match = re.search(r"([\d\.]+)", network_str)
+    return float(match.group(1)) if match else 0.0
+
+
+def add_features(df):
+    # Compute power
+    df["compute_score"] = df["vcpu"]
+
+    # Memory (GiB)
+    df["memory_score"] = df["memory"].str.replace(" GiB", "", regex=False).astype(float)
+
+    # Network (Mbps approx)
+    df["network_score"] = df["networkPerformance"].apply(parse_network)
+
+    # Cost efficiency
+    df["cost_efficiency"] = 1 / (df["price_per_hr"] + 1e-6)
+
+    return df
+
+//preprocessing/normalization.py
+from sklearn.preprocessing import MinMaxScaler
+
+def normalize(df, columns):
+    scaler = MinMaxScaler()
+    df[columns] = scaler.fit_transform(df[columns])
+    return df
+
+//preprocessing/workload_filter.py
+def filter_vms_by_workload(df, constraints):
+    if "min_vcpu" in constraints:
+        df = df[df["vcpu"] >= constraints["min_vcpu"]]
+
+    if "min_memory" in constraints:
+        df = df[df["memory_score"] >= constraints["min_memory"]]
+
+    if "min_network" in constraints:
+        df = df[df["network_score"] >= constraints["min_network"]]
+
+    return df
+
+//scoring/scorer.py
+def score_vms(df, weights):
+    df["final_score"] = (
+        weights["compute"] * df["compute_score"] +
+        weights["memory"] * df["memory_score"] +
+        weights["network"] * df["network_score"] +
+        weights["cost"] * df["cost_efficiency"]
+    )
+
+    return df.sort_values("final_score", ascending=False)
+
+//main.py
+import pandas as pd
+
+from preprocessing.feature_engineering import add_features
+from preprocessing.normalization import normalize
+from scoring.scorer import score_vms
+from optimization.bayesian_optimizer import optimize_weights
+from config.workload_constraints import WORKLOAD_CONSTRAINTS
+from preprocessing.workload_filter import filter_vms_by_workload
+
+# Load AWS data
+df = pd.read_csv("C:/Users/USER/Desktop/Final Project/AWS/aws_ec2_full_dataset.csv")
+
+# Drop rows with missing prices
+df = df[df["price_per_hr"] > 0]
+
+# USER INPUT
+workload = "network_intensive"
+
+# Feature engineering first (to get numeric memory/network)
+df = add_features(df)
+
+# FILTER VMS BASED ON WORKLOAD
+df = filter_vms_by_workload(
+    df,
+    WORKLOAD_CONSTRAINTS[workload]
+)
+
+if df.empty:
+    raise ValueError("No VM satisfies the workload requirements")
+
+# Normalize AFTER filtering
+df = normalize(df, [
+    "compute_score",
+    "memory_score",
+    "network_score",
+    "cost_efficiency"
+])
+
+# Bayesian optimization (filtered data only)
+best_weights = optimize_weights(df, score_vms)
+
+print("\n🔍 Optimized Weights (learned via Bayesian Optimization)")
+for k, v in best_weights.items():
+    print(f"{k}: {v:.3f}")
+
+# Final ranking
+ranked = score_vms(df, best_weights)
+
+print("\n🏆 Top EC2 Recommendations")
+print(
+    ranked[
+        ["instanceType", "vcpu", "memory", "networkPerformance", "price_per_hr", "final_score"]
+    ].head(200)
+)
