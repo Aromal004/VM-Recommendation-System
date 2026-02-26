@@ -1,11 +1,11 @@
-# optimization/bayesian_ranker.py
 from skopt import gp_minimize
 from skopt.space import Real
+
 
 def optimize_weights(df, top_k=10, n_calls=30):
 
     space = [
-        Real(0.2, 0.6, name="fit"),
+        Real(0.3, 0.7, name="fit"),
         Real(0.1, 0.4, name="cost"),
         Real(0.05, 0.2, name="generation"),
     ]
@@ -17,7 +17,7 @@ def optimize_weights(df, top_k=10, n_calls=30):
 
         score = (
             w["fit"] * df["fit_score"]
-            + w["cost"] * df["cost_eff"]
+            + w["cost"] * df["perf_per_dollar"]
             + w["generation"] * df["generation_score"]
         )
 

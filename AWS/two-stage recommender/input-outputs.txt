@@ -1,0 +1,400 @@
+#launch_profiling_ec2
+
+input:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100
+}
+
+output:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100,
+  "launch_result": {
+    "instance_id": "i-0acb0e33516cb29a2",
+    "container_image": "aromal004/test-workload:latest",
+    "port": 5000,
+    "endpoint": "/",
+    "total_requests": 10000,
+    "concurrency": 100
+  }
+}
+
+
+wait...
+
+#collect_metrics
+
+input:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100,
+  "launch_result": {
+    "instance_id": "i-0acb0e33516cb29a2",
+    "container_image": "aromal004/test-workload:latest",
+    "port": 5000,
+    "endpoint": "/",
+    "total_requests": 10000,
+    "concurrency": 100
+  }
+}
+
+
+output:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100,
+  "launch_result": {
+    "instance_id": "i-0acb0e33516cb29a2",
+    "container_image": "aromal004/test-workload:latest",
+    "port": 5000,
+    "endpoint": "/",
+    "total_requests": 10000,
+    "concurrency": 100
+  },
+  "metrics_result": {
+    "cpu_avg": 10,
+    "cpu_p95": 10,
+    "network_in_total_bytes": 1160,
+    "network_out_total_bytes": 1272,
+    "datapoints_collected": 1
+  }
+}
+
+
+#infer_requirements
+inputs:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100,
+  "launch_result": {
+    "instance_id": "i-0acb0e33516cb29a2",
+    "container_image": "aromal004/test-workload:latest",
+    "port": 5000,
+    "endpoint": "/",
+    "total_requests": 10000,
+    "concurrency": 100
+  },
+  "metrics_result": {
+    "cpu_avg": 10,
+    "cpu_p95": 10,
+    "network_in_total_bytes": 1160,
+    "network_out_total_bytes": 1272,
+    "datapoints_collected": 1
+  }
+}
+
+
+output:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100,
+  "launch_result": {
+    "instance_id": "i-0acb0e33516cb29a2",
+    "container_image": "aromal004/test-workload:latest",
+    "port": 5000,
+    "endpoint": "/",
+    "total_requests": 10000,
+    "concurrency": 100
+  },
+  "metrics_result": {
+    "cpu_avg": 10,
+    "cpu_p95": 10,
+    "network_in_total_bytes": 1160,
+    "network_out_total_bytes": 1272,
+    "datapoints_collected": 1
+  },
+  "inference_result": {
+    "vcpu": 2,
+    "memory_gib": 8,
+    "network_mbps": 1000,
+    "max_price": 10
+  }
+}
+
+#recommend_vm
+input:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100,
+  "launch_result": {
+    "instance_id": "i-0acb0e33516cb29a2",
+    "container_image": "aromal004/test-workload:latest",
+    "port": 5000,
+    "endpoint": "/",
+    "total_requests": 10000,
+    "concurrency": 100
+  },
+  "metrics_result": {
+    "cpu_avg": 10,
+    "cpu_p95": 10,
+    "network_in_total_bytes": 1160,
+    "network_out_total_bytes": 1272,
+    "datapoints_collected": 1
+  },
+  "inference_result": {
+    "vcpu": 2,
+    "memory_gib": 8,
+    "network_mbps": 1000,
+    "max_price": 10
+  }
+}
+
+output:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100,
+  "launch_result": {
+    "instance_id": "i-0acb0e33516cb29a2",
+    "container_image": "aromal004/test-workload:latest",
+    "port": 5000,
+    "endpoint": "/",
+    "total_requests": 10000,
+    "concurrency": 100
+  },
+  "metrics_result": {
+    "cpu_avg": 10,
+    "cpu_p95": 10,
+    "network_in_total_bytes": 1160,
+    "network_out_total_bytes": 1272,
+    "datapoints_collected": 1
+  },
+  "inference_result": {
+    "vcpu": 2,
+    "memory_gib": 8,
+    "network_mbps": 1000,
+    "max_price": 10
+  },
+  "recommendation_result": {
+    "recommended_instances": [
+      {
+        "instanceType": "m6a.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.05555,
+        "final_score": 11.179369920641182
+      },
+      {
+        "instanceType": "m6a.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.05555,
+        "final_score": 11.179369920641182
+      },
+      {
+        "instanceType": "m7g.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0583,
+        "final_score": 10.656839663655326
+      },
+      {
+        "instanceType": "m7g.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0583,
+        "final_score": 10.656839663655326
+      },
+      {
+        "instanceType": "m7gd.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.071,
+        "final_score": 8.768805336436213
+      },
+      {
+        "instanceType": "m7gd.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.071,
+        "final_score": 8.768805336436213
+      },
+      {
+        "instanceType": "r6a.large",
+        "vcpu": 2,
+        "memory_gib": 16,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0715,
+        "final_score": 8.706372564430493
+      },
+      {
+        "instanceType": "r6a.large",
+        "vcpu": 2,
+        "memory_gib": 16,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0715,
+        "final_score": 8.706372564430493
+      },
+      {
+        "instanceType": "r7g.large",
+        "vcpu": 2,
+        "memory_gib": 16,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0751,
+        "final_score": 8.293808592273326
+      },
+      {
+        "instanceType": "r7g.large",
+        "vcpu": 2,
+        "memory_gib": 16,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0751,
+        "final_score": 8.293808592273326
+      }
+    ]
+  }
+}
+
+#terminate_ec2
+
+input:
+{
+  "container_image": "aromal004/test-workload:latest",
+  "port": 5000,
+  "endpoint": "/",
+  "total_requests": 10000,
+  "concurrency": 100,
+  "launch_result": {
+    "instance_id": "i-0acb0e33516cb29a2",
+    "container_image": "aromal004/test-workload:latest",
+    "port": 5000,
+    "endpoint": "/",
+    "total_requests": 10000,
+    "concurrency": 100
+  },
+  "metrics_result": {
+    "cpu_avg": 10,
+    "cpu_p95": 10,
+    "network_in_total_bytes": 1160,
+    "network_out_total_bytes": 1272,
+    "datapoints_collected": 1
+  },
+  "inference_result": {
+    "vcpu": 2,
+    "memory_gib": 8,
+    "network_mbps": 1000,
+    "max_price": 10
+  },
+  "recommendation_result": {
+    "recommended_instances": [
+      {
+        "instanceType": "m6a.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.05555,
+        "final_score": 11.179369920641182
+      },
+      {
+        "instanceType": "m6a.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.05555,
+        "final_score": 11.179369920641182
+      },
+      {
+        "instanceType": "m7g.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0583,
+        "final_score": 10.656839663655326
+      },
+      {
+        "instanceType": "m7g.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0583,
+        "final_score": 10.656839663655326
+      },
+      {
+        "instanceType": "m7gd.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.071,
+        "final_score": 8.768805336436213
+      },
+      {
+        "instanceType": "m7gd.large",
+        "vcpu": 2,
+        "memory_gib": 8,
+        "network_mbps": 12500,
+        "price_per_hr": 0.071,
+        "final_score": 8.768805336436213
+      },
+      {
+        "instanceType": "r6a.large",
+        "vcpu": 2,
+        "memory_gib": 16,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0715,
+        "final_score": 8.706372564430493
+      },
+      {
+        "instanceType": "r6a.large",
+        "vcpu": 2,
+        "memory_gib": 16,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0715,
+        "final_score": 8.706372564430493
+      },
+      {
+        "instanceType": "r7g.large",
+        "vcpu": 2,
+        "memory_gib": 16,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0751,
+        "final_score": 8.293808592273326
+      },
+      {
+        "instanceType": "r7g.large",
+        "vcpu": 2,
+        "memory_gib": 16,
+        "network_mbps": 12500,
+        "price_per_hr": 0.0751,
+        "final_score": 8.293808592273326
+      }
+    ]
+  }
+}
+
+output:
+
+{
+  "message": "Instance terminated successfully",
+  "instance_id": "i-0acb0e33516cb29a2"
+}
+

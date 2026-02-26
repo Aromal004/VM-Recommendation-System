@@ -1,4 +1,3 @@
-# postprocessing/diversify.py
 def diversify(df, per_family=2, top_n=10):
     result = []
     counts = {}

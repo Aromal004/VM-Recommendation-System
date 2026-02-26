@@ -1,0 +1,192 @@
+# optimization/bayesian_ranker.py
+from skopt import gp_minimize
+from skopt.space import Real
+
+def optimize_weights(df, top_k=10, n_calls=30):
+
+    space = [
+        Real(0.2, 0.6, name="fit"),
+        Real(0.1, 0.4, name="cost"),
+        Real(0.05, 0.2, name="generation"),
+    ]
+
+    def objective(params):
+        w = dict(zip(["fit", "cost", "generation"], params))
+        s = sum(w.values())
+        w = {k: v / s for k, v in w.items()}
+
+        score = (
+            w["fit"] * df["fit_score"]
+            + w["cost"] * df["cost_eff"]
+            + w["generation"] * df["generation_score"]
+        )
+
+        return -score.nlargest(top_k).mean()
+
+    res = gp_minimize(objective, space, n_calls=n_calls, random_state=42)
+
+    weights = dict(zip(["fit", "cost", "generation"], res.x))
+    s = sum(weights.values())
+    return {k: v / s for k, v in weights.items()}
+
+
+
+
+# postprocessing/diversify.py
+def diversify(df, per_family=2, top_n=10):
+    result = []
+    counts = {}
+
+    for _, row in df.iterrows():
+        fam = row["family"]
+        counts.setdefault(fam, 0)
+
+        if counts[fam] < per_family:
+            result.append(row)
+            counts[fam] += 1
+
+        if len(result) >= top_n:
+            break
+
+    return df.loc[[r.name for r in result]]
+
+
+
+# preprocessing/feature_engineering.py
+import pandas as pd
+import re
+import numpy as np
+
+def parse_network_mbps(val):
+    if pd.isna(val):
+        return 0.0
+    m = re.search(r"([\d\.]+)", val)
+    return float(m.group(1)) if m else 0.0
+
+
+def add_features(df):
+    df = df.copy()
+
+    df["vcpu"] = df["vcpu"].astype(float)
+    df["memory_gib"] = (
+        df["memory"]
+        .str.replace(" GiB", "", regex=False)
+        .astype(float)
+    )
+
+    df["network_mbps"] = df["networkPerformance"].apply(parse_network_mbps)
+
+    # Cost efficiency (bounded)
+    df["cost_eff"] = 1 / (df["price_per_hr"] + 1e-6)
+
+    # Generation score
+    df["generation_score"] = (df["currentGeneration"] == "Yes").astype(int)
+
+    # Instance family buckets
+    df["family"] = df["instanceType"].str.split(".").str[0]
+
+    return df
+
+
+
+
+# preprocessing/hard_filter.py
+def hard_filter(df, req):
+    df = df.copy()
+
+    df = df[df["vcpu"] >= req["vcpu"]]
+    df = df[df["memory_gib"] >= req["memory_gib"]]
+    df = df[df["network_mbps"] >= req["network_mbps"]]
+
+    # Modern only
+    df = df[df["currentGeneration"] == "Yes"]
+
+    # Budget cap (IMPORTANT)
+    if "max_price" in req:
+        df = df[df["price_per_hr"] <= req["max_price"]]
+
+    return df
+
+
+
+# scoring/final_scorer.py
+def rank_instances(df, weights):
+    df = df.copy()
+
+    df["final_score"] = (
+        weights["fit"] * df["fit_score"]
+        + weights["cost"] * df["cost_eff"]
+        + weights["generation"] * df["generation_score"]
+    )
+
+    return df.sort_values("final_score", ascending=False)
+
+
+
+
+
+# scoring/fit_score.py
+import numpy as np
+
+def add_fit_score(df, req):
+    df = df.copy()
+
+    df["cpu_penalty"] = abs(df["vcpu"] - req["vcpu"]) / req["vcpu"]
+    df["mem_penalty"] = abs(df["memory_gib"] - req["memory_gib"]) / req["memory_gib"]
+    df["net_penalty"] = abs(df["network_mbps"] - req["network_mbps"]) / req["network_mbps"]
+
+    df["fit_score"] = 1 / (
+        1 + df["cpu_penalty"] + df["mem_penalty"] + df["net_penalty"]
+    )
+
+    return df
+
+
+import pandas as pd
+
+from preprocessing.feature_engineering import add_features
+from preprocessing.hard_filter import hard_filter
+from scoring.fit_score import add_fit_score
+from optimization.bayesian_ranker import optimize_weights
+from scoring.final_scorer import rank_instances
+from postprocessing.diversify import diversify
+
+# Load data
+df = pd.read_csv("C:/Users/USER/Desktop/Final Project/AWS/aws_ec2_full_dataset.csv")
+df = df[df["price_per_hr"] > 0]
+
+df = add_features(df)
+
+# 🔧 WORKLOAD REQUIREMENTS
+requirements = {
+    "vcpu": 16,
+    "memory_gib": 64,
+    "network_mbps": 25000,
+    "max_price": 10.0
+}
+
+# Stage 1
+df = hard_filter(df, requirements)
+if df.empty:
+    raise ValueError("No instances satisfy hard constraints")
+
+# Stage 2
+df = add_fit_score(df, requirements)
+
+# Stage 3
+weights = optimize_weights(df)
+print("\nOptimized Weights:", weights)
+
+ranked = rank_instances(df, weights)
+
+# Stage 4
+final = diversify(ranked, per_family=2, top_n=10)
+
+print("\n🏆 FINAL EC2 RECOMMENDATIONS\n")
+print(
+    final[
+        ["instanceType", "vcpu", "memory_gib", "network_mbps", "price_per_hr", "final_score"]
+    ]
+)
+
+
