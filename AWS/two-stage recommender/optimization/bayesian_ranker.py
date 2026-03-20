@@ -1,8 +1,9 @@
+# optimization/bayesian_ranker.py
 from skopt import gp_minimize
 from skopt.space import Real
 
 
-def optimize_weights(df, top_k=10, n_calls=30):
+def optimize_weights(df, top_k=10, n_calls=30, random_state=42):
 
     space = [
         Real(0.3, 0.7, name="fit"),
@@ -23,7 +24,12 @@ def optimize_weights(df, top_k=10, n_calls=30):
 
         return -score.nlargest(top_k).mean()
 
-    res = gp_minimize(objective, space, n_calls=n_calls, random_state=42)
+    # n_initial_points must be <= n_calls - 1 (skopt requirement).
+    # Default is 10, which breaks when n_calls < 12 (e.g. sensitivity study).
+    n_initial = min(max(n_calls - 2, 1), 10)
+
+    res = gp_minimize(objective, space, n_calls=n_calls,
+                      n_initial_points=n_initial, random_state=random_state)
 
     weights = dict(zip(["fit", "cost", "generation"], res.x))
     s = sum(weights.values())

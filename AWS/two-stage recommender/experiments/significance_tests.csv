@@ -1,0 +1,5 @@
+Comparison,t-test p,Wilcoxon p,Significant?
+Proposed vs Random,0.0961,0.0127,No
+Proposed vs Heuristic,0.0,1.0,Yes
+Proposed vs CherryPick,0.0,0.001,Yes
+Proposed vs Micky,0.0808,0.9482,No
