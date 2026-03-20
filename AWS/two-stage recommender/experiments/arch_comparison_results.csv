@@ -1,0 +1,4 @@
+Architecture,Instance count,Avg perf/dollar,Avg price/hr,Avg fit_score,Avg compute_score
+Intel (c6i),9884,415717.5,5.1064,0.2485,1994656.0
+AMD (c6a),4363,724217.11,5.0321,0.1684,3378469.0
+ARM Graviton (c6g),2880,401451.18,2.4581,0.4239,936000.0
