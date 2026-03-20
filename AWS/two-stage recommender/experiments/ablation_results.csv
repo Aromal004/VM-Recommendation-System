@@ -1,6 +1,6 @@
 Configuration,NDCG@5,Precision@5,Cost savings (%),Right-sizing error,Latency (s)
-Full model,0.8589,0.8,66.5,3.2207,3.39
-No filtering,1.4344,1.0,98.82,52.7753,4.21
-No fit score,1.0,1.0,40.55,6.3696,3.73
-No BO,0.8589,0.8,66.5,3.2207,0.48
-No diversification,1.0,1.0,76.07,1.9062,3.21
+Full model,0.8589,0.8,66.5,3.2207,2.95
+No filtering,1.4344,1.0,98.82,52.7753,4.12
+No fit score,1.0,1.0,40.55,6.3696,3.17
+No BO,0.8589,0.8,66.5,3.2207,0.49
+No diversification,1.0,1.0,76.07,1.9062,3.43
