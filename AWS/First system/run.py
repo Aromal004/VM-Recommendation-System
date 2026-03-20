@@ -55,7 +55,7 @@ def parse_storage(val):
 
 # ---------------- LOAD DATA ----------------
 
-df = pd.read_csv("C:/Users/USER/Desktop/Final Project/AWS/aws_with_coremark.csv")
+df = pd.read_csv("/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv")
 
 # ---------------- NORMALIZATION ----------------
 

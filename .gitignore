@@ -2,3 +2,4 @@ venv/
 *.pyc
 __pycache__/
 AWS/aws_with_coremark.csv
+aws_with_coremark.csv
