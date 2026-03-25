@@ -1,0 +1,65 @@
+{
+  "Comment": "EC2 workload profiling pipeline — multi-endpoint A/B testing support",
+  "StartAt": "LaunchEC2",
+  "States": {
+    "LaunchEC2": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:634914382615:function:launch_profiling_ec2",
+      "ResultPath": "$.launch_result",
+      "Next": "WaitForWorkload"
+    },
+    "WaitForWorkload": {
+      "Type": "Wait",
+      "Seconds": 240,
+      "Next": "CollectMetrics"
+    },
+    "CollectMetrics": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:634914382615:function:collect_metrics",
+      "Parameters": {
+        "instance_id.$": "$.launch_result.instance_id",
+        "endpoints.$":   "$.endpoints"
+      },
+      "ResultPath": "$.metrics_result",
+      "Next": "InferRequirements"
+    },
+    "InferRequirements": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:634914382615:function:infer_requirements",
+      "Parameters": {
+        "cpu_p95.$":                    "$.metrics_result.cpu_p95",
+        "mem_p95.$":                    "$.metrics_result.mem_p95",
+        "disk_avg.$":                   "$.metrics_result.disk_avg",
+        "network_in_total_bytes.$":     "$.metrics_result.network_in_total_bytes",
+        "network_out_total_bytes.$":    "$.metrics_result.network_out_total_bytes",
+        "latency_p99_ms.$":             "$.metrics_result.latency_p99_ms"
+      },
+      "ResultPath": "$.inference_result",
+      "Next": "RecommendVM"
+    },
+    "RecommendVM": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:634914382615:function:recommend_vm",
+      "Parameters": {
+        "vcpu.$":              "$.inference_result.vcpu",
+        "memory_gib.$":        "$.inference_result.memory_gib",
+        "network_mbps.$":      "$.inference_result.network_mbps",
+        "max_price.$":         "$.inference_result.max_price",
+        "latency_sensitive.$": "$.inference_result.latency_sensitive",
+        "needs_ssd.$":         "$.inference_result.needs_ssd"
+      },
+      "ResultPath": "$.recommendation_result",
+      "Next": "TerminateEC2"
+    },
+    "TerminateEC2": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:634914382615:function:terminate_ec2",
+      "Parameters": {
+        "instance_id.$": "$.launch_result.instance_id"
+      },
+      "ResultPath": "$.terminate_result",
+      "OutputPath": "$",
+      "End": true
+    }
+  }
+}

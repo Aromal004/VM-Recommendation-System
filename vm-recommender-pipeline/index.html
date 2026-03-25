@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VM Recommender</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0c0f;
+    --surface:   #111318;
+    --border:    #1e2229;
+    --accent:    #00d4ff;
+    --accent2:   #00ff9d;
+    --warn:      #ffb800;
+    --danger:    #ff4757;
+    --text:      #e2e8f0;
+    --muted:     #4a5568;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrap {
+    position: relative;
+    z-index: 1;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  header {
+    margin-bottom: 48px;
+    border-left: 3px solid var(--accent);
+    padding-left: 20px;
+  }
+  header .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  header h1 { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+  header p  { margin-top: 8px; color: var(--muted); font-size: 14px; font-family: var(--mono); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+  .card-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group.full { grid-column: 1 / -1; }
+
+  label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 10px 14px;
+    transition: border-color 0.15s;
+    outline: none;
+    width: 100%;
+  }
+  input:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--muted); }
+
+  /* ── endpoint list ── */
+  #endpoint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .endpoint-row {
+    display: grid;
+    grid-template-columns: 160px 1fr 36px;
+    gap: 8px;
+    align-items: center;
+    animation: fadeUp 0.2s forwards;
+  }
+
+  .ep-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+    padding: 0 0 4px 0;
+  }
+
+  .ep-headers {
+    display: grid;
+    grid-template-columns: 160px 1fr 36px;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .btn-remove {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--danger);
+    font-family: var(--mono);
+    font-size: 16px;
+    cursor: pointer;
+    height: 38px;
+    width: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .btn-remove:hover { border-color: var(--danger); background: rgba(255,71,87,0.08); }
+
+  .btn-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 3px;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin-top: 4px;
+  }
+  .btn-add:hover { border-color: var(--accent); background: rgba(0,212,255,0.05); }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 12px 28px;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    margin-top: 8px;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  /* ── status bar ── */
+  #status-bar {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 24px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  #status-bar.show { display: flex; }
+
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot.running { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+  .dot.success { background: var(--accent2); }
+  .dot.failed  { background: var(--danger); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* ── metrics ── */
+  .metrics-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .metric-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+    opacity: 0;
+    transform: translateY(8px);
+    animation: fadeUp 0.4s forwards;
+  }
+  .metric-box:nth-child(1) { animation-delay: 0.05s; }
+  .metric-box:nth-child(2) { animation-delay: 0.10s; }
+  .metric-box:nth-child(3) { animation-delay: 0.15s; }
+  .metric-box:nth-child(4) { animation-delay: 0.20s; }
+
+  @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+  .metric-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .metric-value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .metric-unit { font-size: 11px; color: var(--muted); margin-left: 4px; }
+
+  /* ── A/B comparison table ── */
+  #ab-section { display: none; margin-bottom: 24px; }
+  #ab-section.show { display: block; }
+
+  .ab-section-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ab-section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── results table ── */
+  #results { display: none; }
+  #results.show { display: block; }
+
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .results-table th {
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .results-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .results-table tr:last-child td { border-bottom: none; }
+  .results-table tr {
+    opacity: 0;
+    animation: fadeUp 0.35s forwards;
+  }
+
+  /* winner highlight in A/B table */
+  .ab-winner td { background: rgba(0,255,157,0.04); }
+  .ab-winner .ep-name-cell { color: var(--accent2); }
+
+  .rank-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .rank-1 { background: rgba(0,255,157,0.15); color: var(--accent2); border: 1px solid var(--accent2); }
+  .rank-2 { background: rgba(0,212,255,0.1);  color: var(--accent);  border: 1px solid var(--accent); }
+  .rank-n { background: var(--border);        color: var(--muted);   border: 1px solid var(--border); }
+
+  .instance-type { color: var(--text); font-weight: 500; }
+  .processor { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+  .score-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .score-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    max-width: 80px;
+  }
+  .score-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.8s ease; }
+  .score-val  { color: var(--accent2); min-width: 36px; }
+
+  .lat-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .lat-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    max-width: 60px;
+  }
+  .lat-fill { height: 100%; background: var(--warn); border-radius: 2px; }
+  .lat-fill.best { background: var(--accent2); }
+
+  .price-tag { color: var(--accent2); font-weight: 500; }
+
+  /* ── error box ── */
+  .error-box {
+    display: none;
+    padding: 16px 20px;
+    background: rgba(255,71,87,0.08);
+    border: 1px solid rgba(255,71,87,0.3);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--danger);
+    margin-bottom: 24px;
+  }
+  .error-box.show { display: block; }
+
+  #log { font-family: var(--mono); font-size: 11px; color: var(--muted); min-height: 16px; }
+  #log span { color: var(--accent); }
+
+  @media (max-width: 600px) {
+    .form-grid { grid-template-columns: 1fr; }
+    .metrics-row { grid-template-columns: 1fr 1fr; }
+    .endpoint-row { grid-template-columns: 1fr 1fr 36px; }
+    .results-table th:nth-child(3),
+    .results-table td:nth-child(3),
+    .results-table th:nth-child(4),
+    .results-table td:nth-child(4) { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">// EC2 Instance Recommender</div>
+    <h1>Find Your Optimal VM</h1>
+    <p>Profiles your workload live on AWS · A/B tests multiple endpoints · Returns ranked EC2 recommendations</p>
+  </header>
+
+  <!-- Input Form -->
+  <div class="card">
+    <div class="card-title">Workload Configuration</div>
+    <div class="form-grid">
+
+      <div class="form-group full">
+        <label>Container Image URI</label>
+        <input type="text" id="container_image"
+               placeholder="aromal004/test-workload:latest"
+               value="aromal004/test-workload:latest">
+      </div>
+
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" id="port" placeholder="5000" value="5000">
+      </div>
+
+      <div class="form-group">
+        <label>Concurrency</label>
+        <input type="number" id="concurrency" placeholder="100" value="100">
+      </div>
+
+      <div class="form-group full">
+        <label>Total Requests (per endpoint)</label>
+        <input type="number" id="total_requests" placeholder="10000" value="10000">
+      </div>
+
+      <!-- Endpoint list -->
+      <div class="form-group full">
+        <label>Endpoints to A/B Test</label>
+        <div class="ep-headers">
+          <span class="ep-label">Name</span>
+          <span class="ep-label">Path</span>
+          <span></span>
+        </div>
+        <div id="endpoint-list">
+          <!-- rows injected by JS -->
+        </div>
+        <button class="btn-add" onclick="addEndpoint()">
+          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Add Endpoint
+        </button>
+      </div>
+
+    </div>
+    <button class="btn" id="run-btn" onclick="startPipeline()">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M2 1.5L10 6L2 10.5V1.5Z" fill="currentColor"/>
+      </svg>
+      Run Analysis
+    </button>
+  </div>
+
+  <!-- Status -->
+  <div id="status-bar">
+    <div class="spinner" id="status-spinner"></div>
+    <div class="dot" id="status-dot" style="display:none"></div>
+    <span id="status-text">Starting pipeline...</span>
+    <span id="log" style="margin-left:auto"></span>
+  </div>
+
+  <!-- Error -->
+  <div class="error-box" id="error-box"></div>
+
+  <!-- Observed Metrics -->
+  <div id="metrics-section" style="display:none">
+    <div class="ab-section-title">Observed Metrics</div>
+    <div class="metrics-row" id="metrics-row"></div>
+  </div>
+
+  <!-- A/B Comparison -->
+  <div id="ab-section">
+    <div class="card">
+      <div class="card-title">A/B Endpoint Comparison</div>
+      <table class="results-table" id="ab-table">
+        <thead>
+          <tr>
+            <th>Endpoint</th>
+            <th>Path</th>
+            <th>p50 Latency</th>
+            <th>p95 Latency</th>
+            <th>p99 Latency</th>
+            <th>Req/s</th>
+          </tr>
+        </thead>
+        <tbody id="ab-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- VM Recommendations -->
+  <div id="results">
+    <div class="card">
+      <div class="card-title">Recommended Instances</div>
+      <table class="results-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Instance</th>
+            <th>vCPU / RAM</th>
+            <th>Network</th>
+            <th>Price/hr</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const API_BASE = "https://m50ccolih8.execute-api.us-east-1.amazonaws.com/prod";
+
+  let pollInterval = null;
+
+  // ── Endpoint list management ────────────────────────────
+
+  function createEndpointRow(name = "", path = "/", removable = true) {
+    const row = document.createElement("div");
+    row.className = "endpoint-row";
+    row.innerHTML = `
+      <input type="text"  class="ep-name" placeholder="e.g. control"  value="${name}">
+      <input type="text"  class="ep-path" placeholder="e.g. /"         value="${path}">
+      <button class="btn-remove" onclick="removeEndpoint(this)" title="Remove">×</button>
+    `;
+    if (!removable) {
+      row.querySelector(".btn-remove").style.opacity = "0.2";
+      row.querySelector(".btn-remove").disabled = true;
+    }
+    return row;
+  }
+
+  function addEndpoint(name = "", path = "/") {
+    const list = document.getElementById("endpoint-list");
+    list.appendChild(createEndpointRow(name, path));
+    updateRemoveButtons();
+  }
+
+  function removeEndpoint(btn) {
+    btn.closest(".endpoint-row").remove();
+    updateRemoveButtons();
+  }
+
+  function updateRemoveButtons() {
+    const rows = document.querySelectorAll(".endpoint-row");
+    rows.forEach((row, i) => {
+      const btn = row.querySelector(".btn-remove");
+      // always keep at least one row; disable remove if only one left
+      btn.disabled = rows.length === 1;
+      btn.style.opacity = rows.length === 1 ? "0.2" : "1";
+    });
+  }
+
+  function getEndpoints() {
+    return [...document.querySelectorAll(".endpoint-row")].map(row => ({
+      name: row.querySelector(".ep-name").value.trim() || "endpoint",
+      path: row.querySelector(".ep-path").value.trim() || "/",
+    }));
+  }
+
+  // Seed with two default endpoints
+  addEndpoint("control", "/");
+  addEndpoint("variant", "/v2");
+
+  // ── UI helpers ──────────────────────────────────────────
+
+  function setStatus(state, text) {
+    const bar      = document.getElementById("status-bar");
+    const spinner  = document.getElementById("status-spinner");
+    const dot      = document.getElementById("status-dot");
+    const statusTxt = document.getElementById("status-text");
+
+    bar.classList.add("show");
+    statusTxt.textContent = text;
+
+    if (state === "running") {
+      spinner.style.display = "block";
+      dot.style.display = "none";
+    } else {
+      spinner.style.display = "none";
+      dot.style.display = "block";
+      dot.className = "dot " + state;
+    }
+  }
+
+  function setLog(msg) {
+    document.getElementById("log").innerHTML =
+      msg ? `<span>›</span> ${msg}` : "";
+  }
+
+  function showError(msg) {
+    const box = document.getElementById("error-box");
+    box.textContent = "ERROR: " + msg;
+    box.classList.add("show");
+  }
+
+  function clearError() {
+    document.getElementById("error-box").classList.remove("show");
+  }
+
+  // ── Render helpers ──────────────────────────────────────
+
+  function renderMetrics(metrics, inference) {
+    const section = document.getElementById("metrics-section");
+    const row     = document.getElementById("metrics-row");
+    if (!metrics && !inference) return;
+
+    const items = [
+      { label: "CPU p95",       value: (metrics.cpu_p95         || 0).toFixed(1), unit: "%" },
+      { label: "Memory p95",    value: (metrics.mem_p95         || 0).toFixed(1), unit: "%" },
+      { label: "Latency p99",   value: (metrics.latency_p99_ms  || 0).toFixed(0), unit: "ms" },
+      { label: "Required vCPU", value: inference.vcpu || "-",                      unit: "cores" },
+    ];
+
+    row.innerHTML = items.map(i => `
+      <div class="metric-box">
+        <div class="metric-label">${i.label}</div>
+        <div class="metric-value">${i.value}<span class="metric-unit">${i.unit}</span></div>
+      </div>
+    `).join("");
+
+    section.style.display = "block";
+  }
+
+  function renderABResults(abResults) {
+    if (!abResults || Object.keys(abResults).length === 0) return;
+
+    const section = document.getElementById("ab-section");
+    const tbody   = document.getElementById("ab-body");
+
+    // Find best (lowest) p99 for highlighting
+    const p99s     = Object.values(abResults).map(r => r.latency_p99_ms || 0);
+    const minP99   = Math.min(...p99s);
+    const maxP99   = Math.max(...p99s) || 1;
+
+    // Get endpoint paths from the current form for display
+    const epMap = {};
+    getEndpoints().forEach(ep => { epMap[ep.name] = ep.path; });
+
+    tbody.innerHTML = Object.entries(abResults).map(([name, r], idx) => {
+      const p99      = r.latency_p99_ms  || 0;
+      const p95      = r.latency_p95_ms  || 0;
+      const p50      = r.latency_p50_ms  || 0;
+      const rps      = r.ab_requests_per_sec || 0;
+      const isBest   = p99 === minP99 && p99 > 0;
+      const barWidth = maxP99 > 0 ? (p99 / maxP99 * 100).toFixed(0) : 0;
+      const delay    = (idx * 0.06).toFixed(2);
+      const path     = epMap[name] || "-";
+
+      return `
+        <tr class="${isBest ? "ab-winner" : ""}" style="animation-delay:${delay}s">
+          <td class="ep-name-cell">${name}${isBest ? " ✦" : ""}</td>
+          <td style="color:var(--muted)">${path}</td>
+          <td>${p50.toFixed(1)} ms</td>
+          <td>${p95.toFixed(1)} ms</td>
+          <td>
+            <div class="lat-bar-wrap">
+              <div class="lat-bar">
+                <div class="lat-fill ${isBest ? "best" : ""}" style="width:${barWidth}%"></div>
+              </div>
+              ${p99.toFixed(1)} ms
+            </div>
+          </td>
+          <td>${rps.toFixed(1)}</td>
+        </tr>`;
+    }).join("");
+
+    section.classList.add("show");
+  }
+
+  function renderResults(instances) {
+    const tbody   = document.getElementById("results-body");
+    const section = document.getElementById("results");
+
+    if (!instances || instances.length === 0) {
+      showError("No instances matched your workload requirements.");
+      return;
+    }
+
+    const scores   = instances.map(i => i.final_score || i.perf_per_dollar || 0);
+    const maxScore = Math.max(...scores);
+
+    tbody.innerHTML = instances.map((inst, idx) => {
+      const rankClass = idx === 0 ? "rank-1" : idx === 1 ? "rank-2" : "rank-n";
+      const score     = scores[idx];
+      const barWidth  = maxScore > 0 ? (score / maxScore * 100).toFixed(0) : 0;
+      const delay     = (idx * 0.06).toFixed(2);
+
+      const vcpu  = inst.vcpu || "-";
+      const mem   = inst.memory_gib ? `${inst.memory_gib} GiB` : "-";
+      const net   = inst.network_mbps
+        ? inst.network_mbps >= 1000
+          ? `${(inst.network_mbps / 1000).toFixed(0)} Gbps`
+          : `${inst.network_mbps} Mbps`
+        : "-";
+      const price = inst.price_per_hr ? `$${inst.price_per_hr.toFixed(4)}` : "-";
+      const proc  = inst.physicalProcessor || "";
+
+      return `
+        <tr style="animation-delay:${delay}s">
+          <td><span class="rank-badge ${rankClass}">${idx + 1}</span></td>
+          <td>
+            <div class="instance-type">${inst.instanceType}</div>
+            ${proc ? `<div class="processor">${proc}</div>` : ""}
+          </td>
+          <td>${vcpu} vCPU · ${mem}</td>
+          <td>${net}</td>
+          <td class="price-tag">${price}</td>
+          <td>
+            <div class="score-bar-wrap">
+              <div class="score-bar">
+                <div class="score-fill" style="width:${barWidth}%"></div>
+              </div>
+              <span class="score-val">${score.toFixed ? score.toFixed(2) : score}</span>
+            </div>
+          </td>
+        </tr>`;
+    }).join("");
+
+    section.classList.add("show");
+  }
+
+  // ── Pipeline ────────────────────────────────────────────
+
+  async function startPipeline() {
+    clearError();
+    document.getElementById("results").classList.remove("show");
+    document.getElementById("ab-section").classList.remove("show");
+    document.getElementById("metrics-section").style.display = "none";
+    document.getElementById("results-body").innerHTML = "";
+    document.getElementById("ab-body").innerHTML = "";
+
+    const btn = document.getElementById("run-btn");
+    btn.disabled = true;
+
+    const endpoints = getEndpoints();
+
+    if (endpoints.length === 0) {
+      showError("Add at least one endpoint.");
+      btn.disabled = false;
+      return;
+    }
+
+    const payload = {
+      container_image: document.getElementById("container_image").value.trim(),
+      port:            parseInt(document.getElementById("port").value),
+      endpoints,
+      total_requests:  parseInt(document.getElementById("total_requests").value),
+      concurrency:     parseInt(document.getElementById("concurrency").value),
+    };
+
+    if (!payload.container_image) {
+      showError("Container image is required.");
+      btn.disabled = false;
+      return;
+    }
+
+    const epNames = endpoints.map(e => e.name).join(", ");
+    setStatus("running", "Starting pipeline...");
+    setLog(`Testing endpoints: ${epNames}`);
+
+    try {
+      const res  = await fetch(`${API_BASE}/recommend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to start pipeline");
+      }
+
+      pollResult(data.executionArn, btn, endpoints.length);
+
+    } catch (err) {
+      setStatus("failed", "Failed to start");
+      showError(err.message);
+      btn.disabled = false;
+    }
+  }
+
+  function pollResult(execArn, btn, endpointCount) {
+    let elapsed = 0;
+
+    const steps = [
+      { at: 0,   msg: `Running ${endpointCount} endpoint(s) on EC2...` },
+      { at: 30,  msg: "Collecting CloudWatch metrics..." },
+      { at: 60,  msg: "Inferring resource requirements..." },
+      { at: 90,  msg: "Running Bayesian optimisation..." },
+      { at: 120, msg: "Ranking instances..." },
+    ];
+
+    if (pollInterval) clearInterval(pollInterval);
+
+    pollInterval = setInterval(async () => {
+      elapsed += 15;
+
+      const step = [...steps].reverse().find(s => elapsed >= s.at);
+      if (step) setLog(step.msg);
+      setStatus("running", `Pipeline running · ${elapsed}s elapsed`);
+
+      try {
+        const encoded = encodeURIComponent(execArn);
+        const res     = await fetch(`${API_BASE}/result?executionArn=${encoded}`);
+        const data    = await res.json();
+
+        if (data.status === "SUCCEEDED") {
+          clearInterval(pollInterval);
+          setStatus("success", "Analysis complete");
+          setLog("");
+          renderMetrics(data.metrics, data.inference);
+          renderABResults(data.ab_results);
+          renderResults(data.recommendations);
+          btn.disabled = false;
+        }
+
+        else if (data.status === "FAILED") {
+          clearInterval(pollInterval);
+          setStatus("failed", "Pipeline failed");
+          showError(data.error || "Step Functions execution failed");
+          btn.disabled = false;
+        }
+
+      } catch (err) {
+        setLog("Retrying...");
+      }
+    }, 15000);
+  }
+</script>
+</body>
+</html>
