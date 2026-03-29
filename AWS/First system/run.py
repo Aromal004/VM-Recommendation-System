@@ -83,7 +83,7 @@ df = df[df["price_per_hr"] > 0]
 
 # ---------------- RUN MODEL ----------------
 
-workload = get_workload("network_intensive")
+workload = get_workload("balanced")
 
 recommended = recommend_vms(
     df=df,

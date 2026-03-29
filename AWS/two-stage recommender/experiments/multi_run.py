@@ -16,7 +16,7 @@ Output
   Console summary table
   multi_run_results.csv      — per-run raw data
   statistical_summary.csv    — mean ± std per method
-  significance_tests.csv     — p-values vs proposed method
+  significance_tests.csv     — p-values vs proposed method (NDCG, Cost, RSE)
 """
 
 import sys
@@ -135,38 +135,59 @@ def summarise(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Significance tests
+# Significance tests  — NDCG@5, Cost savings, and RSE
 # ---------------------------------------------------------------------------
 
-def significance_tests(raw: pd.DataFrame,
-                        metric: str = "ndcg_at_k") -> pd.DataFrame:
+def significance_tests(raw: pd.DataFrame) -> pd.DataFrame:
     """
     Paired t-test and Wilcoxon signed-rank test:
-    Proposed vs each other method on the chosen metric.
+    Proposed vs each other method on three metrics:
+      - ndcg_at_k        (higher is better → alternative='greater')
+      - cost_savings_pct (higher is better → alternative='greater')
+      - right_sizing_error (lower is better → alternative='less')
+
     Seeds provide the paired observations.
     """
-    proposed_scores = (
-        raw[raw["method"] == "Proposed"]
-        .sort_values("seed")[metric].values
-    )
+    proposed = raw[raw["method"] == "Proposed"].sort_values("seed")
+
+    # metric label → (column name, wilcoxon alternative, friendly label)
+    metrics = [
+        ("ndcg_at_k",          "greater", "NDCG@5"),
+        ("cost_savings_pct",   "greater", "Cost savings (%)"),
+        ("right_sizing_error", "less",    "Right-sizing error"),
+    ]
+
     rows = []
     for method in raw["method"].unique():
         if method == "Proposed":
             continue
-        other_scores = (
-            raw[raw["method"] == method]
-            .sort_values("seed")[metric].values
-        )
-        _, p_ttest    = stats.ttest_rel(proposed_scores, other_scores)
-        _, p_wilcoxon = stats.wilcoxon(proposed_scores, other_scores,
-                                       alternative="greater",
-                                       zero_method="wilcox")
-        rows.append({
-            "Comparison":    f"Proposed vs {method}",
-            "t-test p":      round(p_ttest, 4),
-            "Wilcoxon p":    round(p_wilcoxon, 4),
-            "Significant?":  "Yes" if p_ttest < 0.05 else "No",
-        })
+        other = raw[raw["method"] == method].sort_values("seed")
+
+        for col, alternative, label in metrics:
+            prop_vals  = proposed[col].values
+            other_vals = other[col].values
+
+            _, p_ttest = stats.ttest_rel(prop_vals, other_vals)
+
+            # Wilcoxon requires non-zero differences; catch the edge case
+            try:
+                _, p_wilcox = stats.wilcoxon(
+                    prop_vals, other_vals,
+                    alternative=alternative,
+                    zero_method="wilcox",
+                )
+            except ValueError:
+                # All differences are zero — methods are identical on this metric
+                p_wilcox = 1.0
+
+            rows.append({
+                "Comparison":    f"Proposed vs {method}",
+                "Metric":        label,
+                "t-test p":      round(p_ttest,  4),
+                "Wilcoxon p":    round(p_wilcox, 4),
+                "Significant?":  "Yes" if p_ttest < 0.05 else "No",
+            })
+
     return pd.DataFrame(rows)
 
 
@@ -190,11 +211,19 @@ if __name__ == "__main__":
     print("=" * 80)
     print(summary.to_string())
 
-    # Significance tests
-    sig = significance_tests(raw, metric="ndcg_at_k")
+    # Significance tests across all three metrics
+    sig = significance_tests(raw)
     sig.to_csv(os.path.join(out_dir, "significance_tests.csv"), index=False)
 
     print("\n" + "=" * 80)
-    print("SIGNIFICANCE TESTS  (paired, metric = NDCG@5)")
+    print("SIGNIFICANCE TESTS  (paired t-test + Wilcoxon, Proposed vs baselines)")
     print("=" * 80)
-    print(sig.to_string(index=False))
+
+    for metric_label in ["NDCG@5", "Cost savings (%)", "Right-sizing error"]:
+        subset = sig[sig["Metric"] == metric_label]
+        print(f"\n  Metric: {metric_label}")
+        print(f"  {'Comparison':<28}  {'t-test p':>10}  {'Wilcoxon p':>12}  {'Significant?':>13}")
+        print("  " + "-" * 70)
+        for _, row in subset.iterrows():
+            print(f"  {row['Comparison']:<28}  {row['t-test p']:>10.4f}"
+                  f"  {row['Wilcoxon p']:>12.4f}  {row['Significant?']:>13}")

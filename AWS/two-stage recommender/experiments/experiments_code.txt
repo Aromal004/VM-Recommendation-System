@@ -1,0 +1,838 @@
+//ablation_runner.py
+"""
+experiments/ablation_runner.py
+------------------------------
+Ablation study: isolates the contribution of each pipeline component.
+
+Variants
+--------
+  full          : complete pipeline (hard filter + fit score + BO weights + diversify)
+  no_filter     : skip hard_filter  — all instances enter scoring
+  no_fit_score  : replace fit_score with uniform 1.0  (removes right-sizing signal)
+  no_bo         : replace Bayesian-optimized weights with equal 1/3 weights
+  no_diversify  : skip family-diversity cap on final list
+
+Usage
+-----
+  python experiments/ablation_runner.py
+
+Output
+------
+  Console table + ablation_results.csv saved to experiments/
+"""
+
+import sys
+import os
+import time
+import pandas as pd
+import numpy as np
+
+# Allow running from project root
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from preprocessing.feature_engineering import add_features
+from preprocessing.hard_filter import hard_filter
+from scoring.fit_score import add_fit_score
+from optimization.bayesian_ranker import optimize_weights
+from scoring.final_scorer import rank_instances
+from postprocessing.diversify import diversify
+from evaluation.metrics import evaluate_all
+
+
+# ---------------------------------------------------------------------------
+# Config — mirror main.py exactly
+# ---------------------------------------------------------------------------
+
+DATA_PATH = "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+BASELINE_COREMARK_PER_CORE = 27_000
+
+REQUIREMENTS = {
+    "required_compute": 16 * BASELINE_COREMARK_PER_CORE,
+    "memory_gib":       64,
+    "network_mbps":     25_000,
+    "max_price":        10.0,
+}
+
+TOP_K   = 10
+EVAL_K  = 5   # NDCG / Precision cut-off
+BO_CALLS = 30
+
+
+# ---------------------------------------------------------------------------
+# Pipeline variants
+# ---------------------------------------------------------------------------
+
+def load_and_engineer(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    return add_features(df)
+
+
+def run_full(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    t0 = time.perf_counter()
+    df = hard_filter(df_raw, REQUIREMENTS)
+    df = add_fit_score(df, REQUIREMENTS)
+    weights = optimize_weights(df, top_k=TOP_K, n_calls=BO_CALLS)
+    ranked  = rank_instances(df, weights)
+    final   = diversify(ranked, per_family=2, top_n=TOP_K)
+    elapsed = time.perf_counter() - t0
+    return final, ranked, elapsed     # pool = ranked (has final_score)
+
+
+def run_no_filter(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    """Skip hard_filter — all instances pass to scoring."""
+    t0 = time.perf_counter()
+    df = df_raw.copy()
+    df = add_fit_score(df, REQUIREMENTS)
+    weights = optimize_weights(df, top_k=TOP_K, n_calls=BO_CALLS)
+    ranked  = rank_instances(df, weights)
+    final   = diversify(ranked, per_family=2, top_n=TOP_K)
+    elapsed = time.perf_counter() - t0
+    return final, ranked, elapsed
+
+
+def run_no_fit_score(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    """Replace fit_score with constant 1.0 — removes right-sizing signal."""
+    t0 = time.perf_counter()
+    df = hard_filter(df_raw, REQUIREMENTS)
+    df = df.copy()
+    df["fit_score"] = 1.0             # neutralise fit component
+    weights = optimize_weights(df, top_k=TOP_K, n_calls=BO_CALLS)
+    ranked  = rank_instances(df, weights)
+    final   = diversify(ranked, per_family=2, top_n=TOP_K)
+    elapsed = time.perf_counter() - t0
+    return final, ranked, elapsed
+
+
+def run_no_bo(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    """Replace Bayesian-optimized weights with fixed equal weights."""
+    t0 = time.perf_counter()
+    df = hard_filter(df_raw, REQUIREMENTS)
+    df = add_fit_score(df, REQUIREMENTS)
+    equal_weights = {"fit": 1/3, "cost": 1/3, "generation": 1/3}
+    ranked  = rank_instances(df, equal_weights)
+    final   = diversify(ranked, per_family=2, top_n=TOP_K)
+    elapsed = time.perf_counter() - t0
+    return final, ranked, elapsed
+
+
+def run_no_diversify(df_raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    """Skip family-diversity cap."""
+    t0 = time.perf_counter()
+    df = hard_filter(df_raw, REQUIREMENTS)
+    df = add_fit_score(df, REQUIREMENTS)
+    weights = optimize_weights(df, top_k=TOP_K, n_calls=BO_CALLS)
+    ranked  = rank_instances(df, weights)
+    final   = ranked.head(TOP_K)      # raw top-k, no family cap
+    elapsed = time.perf_counter() - t0
+    return final, ranked, elapsed
+
+
+# ---------------------------------------------------------------------------
+# Run all variants and collect metrics
+# ---------------------------------------------------------------------------
+
+VARIANTS = {
+    "Full model":        run_full,
+    "No filtering":      run_no_filter,
+    "No fit score":      run_no_fit_score,
+    "No BO":             run_no_bo,
+    "No diversification": run_no_diversify,
+}
+
+
+def run_ablation(data_path: str = DATA_PATH) -> pd.DataFrame:
+    print("Loading and engineering features...")
+    df_raw = load_and_engineer(data_path)
+
+    records = []
+    for name, fn in VARIANTS.items():
+        print(f"  Running: {name}...")
+        try:
+            top_k_df, pool_df, latency = fn(df_raw)
+            metrics = evaluate_all(top_k_df, pool_df, REQUIREMENTS, k=EVAL_K)
+            records.append({
+                "Configuration":     name,
+                "NDCG@5":            metrics["ndcg_at_k"],
+                "Precision@5":       metrics["precision_at_k"],
+                "Cost savings (%)":  metrics["cost_savings_pct"],
+                "Right-sizing error": metrics["right_sizing_error"],
+                "Latency (s)":       round(latency, 2),
+            })
+        except Exception as e:
+            print(f"    ERROR in {name}: {e}")
+
+    return pd.DataFrame(records)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    results = run_ablation()
+
+    # Pretty-print
+    pd.set_option("display.float_format", "{:.4f}".format)
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.width", 120)
+
+    print("\n" + "=" * 80)
+    print("ABLATION STUDY RESULTS")
+    print("=" * 80)
+    print(results.to_string(index=False))
+
+    # Save
+    out_path = os.path.join(os.path.dirname(__file__), "ablation_results.csv")
+    results.to_csv(out_path, index=False)
+    print(f"\nSaved to {out_path}")
+
+    # Delta vs full model
+    full_row = results[results["Configuration"] == "Full model"].iloc[0]
+    print("\nDelta vs Full model (positive = full model better):")
+    for _, row in results.iterrows():
+        if row["Configuration"] == "Full model":
+            continue
+        delta_ndcg = full_row["NDCG@5"] - row["NDCG@5"]
+        delta_prec = full_row["Precision@5"] - row["Precision@5"]
+        print(f"  {row['Configuration']:<22}  ΔNDCG={delta_ndcg:+.4f}  ΔPrecision={delta_prec:+.4f}")
+
+
+//arch_comparison.py
+"""
+experiments/arch_comparison.py
+--------------------------------
+Architecture comparison: Intel (c6i) vs AMD (c6a) vs ARM Graviton.
+
+Network constraint is dropped for this experiment since Graviton instances
+in the dataset don't meet the 25 Gbps threshold — this is noted in results.
+fit_score is recomputed without the network penalty for fair comparison.
+"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import pandas as pd
+import numpy as np
+from preprocessing.feature_engineering import add_features
+from preprocessing.hard_filter import hard_filter
+
+DATA_PATH = "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+
+REQUIREMENTS_NO_NET = {
+    "required_compute": 16 * 27000,
+    "memory_gib":       64,
+    "network_mbps":     0,       # dropped for arch comparison
+    "max_price":        10.0,
+}
+
+def add_fit_score_no_net(df, req):
+    """fit_score using only compute and memory penalty (no network term)."""
+    df = df.copy()
+    compute_penalty = ((df["compute_score"] - req["required_compute"]) / req["required_compute"]).clip(lower=0)
+    mem_penalty     = ((df["memory_gib"]    - req["memory_gib"])       / req["memory_gib"]).clip(lower=0)
+    df["fit_score"] = 1 / (1 + compute_penalty + mem_penalty)
+    return df
+
+df_raw = add_features(pd.read_csv(DATA_PATH))
+pool   = hard_filter(df_raw, REQUIREMENTS_NO_NET)
+pool   = add_fit_score_no_net(pool, REQUIREMENTS_NO_NET)
+
+# Find best available ARM family (prefer compute: c6g > m6g > others)
+arm_candidates = [f for f in pool["family"].unique()
+                  if any(f.startswith(p) for p in ["c6g","c7g","m6g","m7g","r6g","r7g"])]
+arm_family = next((f for f in ["c6g","c7g","m6g","m7g"] if f in arm_candidates), 
+                  arm_candidates[0] if arm_candidates else None)
+
+print(f"Available ARM families: {arm_candidates}")
+print(f"Selected ARM family: {arm_family}\n")
+
+ARCH_MAP = {
+    "c6i": "Intel (c6i)",
+    "c6a": "AMD (c6a)",
+}
+if arm_family:
+    ARCH_MAP[arm_family] = f"ARM Graviton ({arm_family})"
+
+print(f"{'Architecture':<26} {'Instances':>10} {'Avg perf/dollar':>16} "
+      f"{'Avg price/hr':>13} {'Avg fit_score':>14} {'Avg compute_score':>18}")
+print("-" * 92)
+
+records = []
+for family, arch_name in ARCH_MAP.items():
+    subset = pool[pool["family"] == family]
+    if subset.empty:
+        print(f"{arch_name:<26} {'not found':>10}")
+        continue
+    rec = {
+        "Architecture":      arch_name,
+        "Instance count":    len(subset),
+        "Avg perf/dollar":   round(subset["perf_per_dollar"].mean(), 2),
+        "Avg price/hr":      round(subset["price_per_hr"].mean(), 4),
+        "Avg fit_score":     round(subset["fit_score"].mean(), 4),
+        "Avg compute_score": round(subset["compute_score"].mean(), 0),
+    }
+    records.append(rec)
+    print(f"{arch_name:<26} {rec['Instance count']:>10} "
+          f"{rec['Avg perf/dollar']:>16.2f} {rec['Avg price/hr']:>13.4f} "
+          f"{rec['Avg fit_score']:>14.4f} {rec['Avg compute_score']:>18.0f}")
+
+print("\nNote: network_mbps constraint removed for this comparison.")
+print("      Graviton instances do not meet the 25 Gbps network requirement")
+print("      of the main workload, so they are excluded from primary recommendations.")
+
+df_out = pd.DataFrame(records)
+df_out.to_csv(os.path.join(os.path.dirname(__file__), "arch_comparison_results.csv"), index=False)
+print("\nSaved to experiments/arch_comparison_results.csv")
+
+
+//bo_sensitivity.py
+"""
+experiments/bo_sensitivity.py
+------------------------------
+Bayesian Optimisation sensitivity analysis.
+
+Experiment 1 — Iteration study
+    How does recommendation quality (NDCG@5) change as BO iterations increase?
+    Tests: n_calls ∈ {5, 10, 20, 30, 45, 60}
+
+Experiment 2 — Weight stability
+    Are the optimised weights stable across different random seeds?
+    Tests: seeds 0–9 at fixed n_calls = 30
+
+Usage
+-----
+  python experiments/bo_sensitivity.py
+
+Output
+------
+  bo_iteration_study.csv  — score vs iterations
+  bo_weight_stability.csv — weight values per seed
+"""
+
+import sys
+import os
+import pandas as pd
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from preprocessing.feature_engineering import add_features
+from preprocessing.hard_filter import hard_filter
+from scoring.fit_score import add_fit_score
+from optimization.bayesian_ranker import optimize_weights
+from scoring.final_scorer import rank_instances
+from postprocessing.diversify import diversify
+from evaluation.metrics import evaluate_all
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+DATA_PATH = "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+BASELINE_COREMARK_PER_CORE = 27_000
+
+REQUIREMENTS = {
+    "required_compute": 16 * BASELINE_COREMARK_PER_CORE,
+    "memory_gib":       64,
+    "network_mbps":     25_000,
+    "max_price":        10.0,
+}
+
+TOP_K = 10
+EVAL_K = 5
+
+ITERATION_GRID = [5, 10, 20, 30, 45, 60]
+SEED_GRID      = list(range(10))
+FIXED_CALLS    = 30
+
+
+# ---------------------------------------------------------------------------
+# Shared setup: load + filter + score once
+# ---------------------------------------------------------------------------
+
+def prepare_pool(data_path: str) -> pd.DataFrame:
+    df = add_features(pd.read_csv(data_path))
+    df = hard_filter(df, REQUIREMENTS)
+    df = add_fit_score(df, REQUIREMENTS)
+    if df.empty:
+        raise ValueError("No instances survive the hard filter.")
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Experiment 1: iteration study
+# ---------------------------------------------------------------------------
+
+def bo_iteration_study(pool: pd.DataFrame,
+                       iteration_grid: list = ITERATION_GRID,
+                       seed: int = 42) -> pd.DataFrame:
+    """
+    Run BO with each n_calls value and record NDCG@K.
+    Uses a single fixed seed so the only variable is the number of iterations.
+    """
+    records = []
+    for n in iteration_grid:
+        print(f"  n_calls = {n:3d} ...", end="  ")
+        weights = optimize_weights(pool, top_k=TOP_K,
+                                   n_calls=n, random_state=seed)
+        ranked  = rank_instances(pool, weights)
+        final   = diversify(ranked, per_family=2, top_n=TOP_K)
+        metrics = evaluate_all(final, ranked, REQUIREMENTS, k=EVAL_K)
+        records.append({
+            "n_calls":   n,
+            "NDCG@5":    metrics["ndcg_at_k"],
+            "Precision@5": metrics["precision_at_k"],
+            "w_fit":     round(weights["fit"], 4),
+            "w_cost":    round(weights["cost"], 4),
+            "w_generation": round(weights["generation"], 4),
+        })
+        print(f"NDCG={metrics['ndcg_at_k']:.4f}")
+    return pd.DataFrame(records)
+
+
+# ---------------------------------------------------------------------------
+# Experiment 2: weight stability across seeds
+# ---------------------------------------------------------------------------
+
+def bo_weight_stability(pool: pd.DataFrame,
+                        seed_grid: list = SEED_GRID,
+                        n_calls: int = FIXED_CALLS) -> pd.DataFrame:
+    """
+    Run BO with fixed n_calls but varying random seeds.
+    Shows how stable the optimised weights are across initialisations.
+    """
+    records = []
+    for seed in seed_grid:
+        print(f"  seed = {seed:2d} ...", end="  ")
+        weights = optimize_weights(pool, top_k=TOP_K,
+                                   n_calls=n_calls, random_state=seed)
+        ranked  = rank_instances(pool, weights)
+        final   = diversify(ranked, per_family=2, top_n=TOP_K)
+        metrics = evaluate_all(final, ranked, REQUIREMENTS, k=EVAL_K)
+        records.append({
+            "seed":          seed,
+            "w_fit":         round(weights["fit"], 4),
+            "w_cost":        round(weights["cost"], 4),
+            "w_generation":  round(weights["generation"], 4),
+            "NDCG@5":        metrics["ndcg_at_k"],
+        })
+        print(f"w_fit={weights['fit']:.3f}  w_cost={weights['cost']:.3f}  "
+              f"w_gen={weights['generation']:.3f}  NDCG={metrics['ndcg_at_k']:.4f}")
+    return pd.DataFrame(records)
+
+
+def weight_stability_summary(stability_df: pd.DataFrame) -> dict:
+    """Mean and std of each weight dimension."""
+    dims = ["w_fit", "w_cost", "w_generation"]
+    return {
+        d: f"{stability_df[d].mean():.4f} ± {stability_df[d].std(ddof=1):.4f}"
+        for d in dims
+    }
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    out_dir = os.path.dirname(__file__)
+
+    print(f"\nLoading and preparing pool from:\n  {DATA_PATH}")
+    pool = prepare_pool(DATA_PATH)
+    print(f"Pool size after hard filter: {len(pool)} instances\n")
+
+    # Experiment 1
+    print("=" * 60)
+    print("Experiment 1: BO iteration study")
+    print("=" * 60)
+    iter_df = bo_iteration_study(pool)
+    iter_df.to_csv(os.path.join(out_dir, "bo_iteration_study.csv"), index=False)
+    print("\n", iter_df[["n_calls", "NDCG@5", "Precision@5"]].to_string(index=False))
+
+    # Experiment 2
+    print("\n" + "=" * 60)
+    print("Experiment 2: Weight stability across seeds")
+    print("=" * 60)
+    stab_df = bo_weight_stability(pool)
+    stab_df.to_csv(os.path.join(out_dir, "bo_weight_stability.csv"), index=False)
+
+    summary = weight_stability_summary(stab_df)
+    print("\nWeight stability summary (mean ± std across 10 seeds):")
+    for dim, val in summary.items():
+        print(f"  {dim:<16}: {val}")
+
+    ndcg_std = stab_df["NDCG@5"].std(ddof=1)
+    print(f"\n  NDCG@5 variance across seeds: std = {ndcg_std:.4f}")
+    if ndcg_std < 0.02:
+        print("  → Weights are STABLE (std < 0.02): BO converges consistently.")
+    else:
+        print("  → Consider increasing n_calls for tighter convergence.")
+
+//composite_summary.py
+"""
+experiments/composite_summary.py
+---------------------------------
+Produces the final comparison table for the paper, combining all metrics
+into a composite score that captures the three-way trade-off:
+ranking quality (NDCG), cost efficiency, and workload fit (right-sizing).
+
+Composite score = 0.4 * NDCG@5  +  0.4 * cost_efficiency  +  0.2 * fit_quality
+where:
+  cost_efficiency = cost_savings_pct / 100  (normalised to [0,1])
+  fit_quality     = 1 / (1 + right_sizing_error)  (inverse, bounded to [0,1])
+
+Weights reflect that NDCG and cost are the primary objectives,
+fit quality is the tiebreaker.
+"""
+
+import pandas as pd
+import numpy as np
+
+# Load the multi-run statistical summary
+raw = pd.read_csv("experiments/multi_run_results.csv")
+
+methods = raw["method"].unique()
+records = []
+
+for method in methods:
+    grp = raw[raw["method"] == method]
+    ndcg_mean  = grp["ndcg_at_k"].mean()
+    ndcg_std   = grp["ndcg_at_k"].std(ddof=1)
+    prec_mean  = grp["precision_at_k"].mean()
+    cost_mean  = grp["cost_savings_pct"].mean()
+    cost_std   = grp["cost_savings_pct"].std(ddof=1)
+    rse_mean   = grp["right_sizing_error"].mean()
+
+    # Composite score components
+    cost_eff   = max(cost_mean / 100, 0)          # normalise to [0,1]
+    fit_qual   = 1 / (1 + rse_mean)               # inverse RSE, bounded (0,1]
+
+    composite  = 0.4 * ndcg_mean + 0.4 * cost_eff + 0.2 * fit_qual
+
+    records.append({
+        "Method":              method,
+        "NDCG@5":              f"{ndcg_mean:.4f} ± {ndcg_std:.4f}",
+        "Precision@5":         f"{prec_mean:.4f}",
+        "Cost savings (%)":    f"{cost_mean:.2f} ± {cost_std:.2f}",
+        "Right-sizing error":  f"{rse_mean:.4f}",
+        "Composite score":     round(composite, 4),
+    })
+
+df = pd.DataFrame(records).sort_values("Composite score", ascending=False)
+df = df.reset_index(drop=True)
+
+print("\n" + "=" * 90)
+print("FINAL COMPARISON TABLE  (sorted by composite score)")
+print("=" * 90)
+print(df.to_string(index=False))
+print("\nComposite = 0.4 × NDCG@5  +  0.4 × (cost_savings/100)  +  0.2 × (1/(1+RSE))")
+
+df.to_csv("experiments/final_comparison_table.csv", index=False)
+print("\nSaved to experiments/final_comparison_table.csv")
+
+
+# ---------------------------------------------------------------------------
+# Diversity audit — add unique family count to the table
+# ---------------------------------------------------------------------------
+
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from preprocessing.feature_engineering import add_features
+from preprocessing.hard_filter import hard_filter
+from scoring.fit_score import add_fit_score
+from optimization.bayesian_ranker import optimize_weights
+from scoring.final_scorer import rank_instances
+from postprocessing.diversify import diversify
+from baselines.baseline_methods import run_all_baselines
+import pandas as pd
+
+REQUIREMENTS = {"required_compute": 16*27000, "memory_gib": 64,
+                "network_mbps": 25000, "max_price": 10.0}
+
+df_raw  = add_features(pd.read_csv(
+    next(p for p in [
+        "aws_with_coremark.csv",
+        "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+    ] if os.path.exists(p))
+))
+pool    = hard_filter(df_raw, REQUIREMENTS)
+pool    = add_fit_score(pool, REQUIREMENTS)
+eq_w    = {"fit": 1/3, "cost": 1/3, "generation": 1/3}
+pool_r  = rank_instances(pool, eq_w)
+
+weights  = optimize_weights(pool, top_k=10, n_calls=30, random_state=42)
+ranked   = rank_instances(pool, weights)
+proposed = diversify(ranked, per_family=2, top_n=10)
+bases    = run_all_baselines(pool_r, top_n=10, seed=42)
+
+all_picks = {"Proposed": proposed, **bases}
+
+print("\n" + "=" * 70)
+print("DIVERSITY AUDIT — unique instance types and families in top-5")
+print("=" * 70)
+print(f"{'Method':<12} {'Unique types':>13} {'Unique families':>16}")
+print("-" * 45)
+for name, picks in all_picks.items():
+    top5        = picks.head(5)
+    u_types     = top5["instanceType"].nunique()
+    u_families  = top5["family"].nunique()
+    print(f"{name:<12} {u_types:>13} {u_families:>16}")
+
+
+
+
+//multi_run.py
+"""
+experiments/multi_run.py
+------------------------
+Statistical validation of the two-stage pipeline.
+
+Runs the full pipeline and all baselines across N random seeds,
+collects per-run metrics, reports mean ± std, and performs
+significance tests (paired t-test + Wilcoxon signed-rank).
+
+Usage
+-----
+  python experiments/multi_run.py
+
+Output
+------
+  Console summary table
+  multi_run_results.csv      — per-run raw data
+  statistical_summary.csv    — mean ± std per method
+  significance_tests.csv     — p-values vs proposed method
+"""
+
+import sys
+import os
+import pandas as pd
+import numpy as np
+from scipy import stats
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from preprocessing.feature_engineering import add_features
+from preprocessing.hard_filter import hard_filter
+from scoring.fit_score import add_fit_score
+from optimization.bayesian_ranker import optimize_weights
+from scoring.final_scorer import rank_instances
+from postprocessing.diversify import diversify
+from baselines.baseline_methods import run_all_baselines
+from evaluation.metrics import evaluate_all
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+DATA_PATH = "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+BASELINE_COREMARK_PER_CORE = 27_000
+
+REQUIREMENTS = {
+    "required_compute": 16 * BASELINE_COREMARK_PER_CORE,
+    "memory_gib":       64,
+    "network_mbps":     25_000,
+    "max_price":        10.0,
+}
+
+TOP_K    = 10
+EVAL_K   = 5
+BO_CALLS = 30
+N_RUNS   = 10   # number of independent seeds; use 5 for a quicker run
+
+
+# ---------------------------------------------------------------------------
+# Single-run helpers
+# ---------------------------------------------------------------------------
+
+def run_proposed(df_raw: pd.DataFrame, seed: int) -> pd.DataFrame:
+    """One run of the full two-stage pipeline with a given random seed."""
+    df = hard_filter(df_raw, REQUIREMENTS)
+    df = add_fit_score(df, REQUIREMENTS)
+    weights = optimize_weights(df, top_k=TOP_K, n_calls=BO_CALLS,
+                               random_state=seed)
+    ranked = rank_instances(df, weights)
+    return diversify(ranked, per_family=2, top_n=TOP_K), ranked
+
+
+def run_baseline(df_raw: pd.DataFrame, name: str, seed: int) -> pd.DataFrame:
+    """One run of a named baseline method."""
+    df = hard_filter(df_raw, REQUIREMENTS)
+    df = add_fit_score(df, REQUIREMENTS)
+    # Give pool a final_score column so evaluate_all works uniformly
+    equal_weights = {"fit": 1/3, "cost": 1/3, "generation": 1/3}
+    pool = rank_instances(df, equal_weights)
+    all_baselines = run_all_baselines(pool, top_n=TOP_K, seed=seed)
+    return all_baselines[name], pool
+
+
+# ---------------------------------------------------------------------------
+# Main experiment loop
+# ---------------------------------------------------------------------------
+
+def run_multi(data_path: str = DATA_PATH,
+              n_runs: int = N_RUNS) -> pd.DataFrame:
+
+    print(f"Loading data from {data_path} ...")
+    df_raw = add_features(pd.read_csv(data_path))
+
+    methods = ["Proposed", "Random", "Heuristic", "CherryPick", "Micky"]
+    seeds   = list(range(n_runs))
+    records = []
+
+    for seed in seeds:
+        print(f"  Seed {seed:02d} / {n_runs - 1} ...", end="  ")
+
+        # Proposed pipeline
+        top_k, pool = run_proposed(df_raw, seed)
+        m = evaluate_all(top_k, pool, REQUIREMENTS, k=EVAL_K)
+        records.append({"seed": seed, "method": "Proposed", **m})
+
+        # Baselines
+        for bname in ["Random", "Heuristic", "CherryPick", "Micky"]:
+            top_k_b, pool_b = run_baseline(df_raw, bname, seed)
+            m_b = evaluate_all(top_k_b, pool_b, REQUIREMENTS, k=EVAL_K)
+            records.append({"seed": seed, "method": bname, **m_b})
+
+        print("done")
+
+    return pd.DataFrame(records)
+
+
+# ---------------------------------------------------------------------------
+# Summary statistics
+# ---------------------------------------------------------------------------
+
+def summarise(raw: pd.DataFrame) -> pd.DataFrame:
+    """Mean ± std for each method across all seeds."""
+    metric_cols = ["ndcg_at_k", "precision_at_k",
+                   "cost_savings_pct", "right_sizing_error"]
+    rows = []
+    for method, grp in raw.groupby("method"):
+        row = {"Method": method}
+        for col in metric_cols:
+            mu  = grp[col].mean()
+            std = grp[col].std(ddof=1)
+            row[col] = f"{mu:.4f} ± {std:.4f}"
+        rows.append(row)
+    return pd.DataFrame(rows).set_index("Method")
+
+
+# ---------------------------------------------------------------------------
+# Significance tests
+# ---------------------------------------------------------------------------
+
+def significance_tests(raw: pd.DataFrame,
+                        metric: str = "ndcg_at_k") -> pd.DataFrame:
+    """
+    Paired t-test and Wilcoxon signed-rank test:
+    Proposed vs each other method on the chosen metric.
+    Seeds provide the paired observations.
+    """
+    proposed_scores = (
+        raw[raw["method"] == "Proposed"]
+        .sort_values("seed")[metric].values
+    )
+    rows = []
+    for method in raw["method"].unique():
+        if method == "Proposed":
+            continue
+        other_scores = (
+            raw[raw["method"] == method]
+            .sort_values("seed")[metric].values
+        )
+        _, p_ttest    = stats.ttest_rel(proposed_scores, other_scores)
+        _, p_wilcoxon = stats.wilcoxon(proposed_scores, other_scores,
+                                       alternative="greater",
+                                       zero_method="wilcox")
+        rows.append({
+            "Comparison":    f"Proposed vs {method}",
+            "t-test p":      round(p_ttest, 4),
+            "Wilcoxon p":    round(p_wilcoxon, 4),
+            "Significant?":  "Yes" if p_ttest < 0.05 else "No",
+        })
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    raw = run_multi()
+
+    # Save raw per-run data
+    out_dir = os.path.dirname(__file__)
+    raw.to_csv(os.path.join(out_dir, "multi_run_results.csv"), index=False)
+
+    # Summary table
+    summary = summarise(raw)
+    summary.to_csv(os.path.join(out_dir, "statistical_summary.csv"))
+
+    print("\n" + "=" * 80)
+    print("STATISTICAL SUMMARY  (mean ± std over", N_RUNS, "runs)")
+    print("=" * 80)
+    print(summary.to_string())
+
+    # Significance tests
+    sig = significance_tests(raw, metric="ndcg_at_k")
+    sig.to_csv(os.path.join(out_dir, "significance_tests.csv"), index=False)
+
+    print("\n" + "=" * 80)
+    print("SIGNIFICANCE TESTS  (paired, metric = NDCG@5)")
+    print("=" * 80)
+    print(sig.to_string(index=False))
+
+
+
+//scalability.py
+"""
+experiments/scalability.py
+---------------------------
+Scalability analysis: measures pipeline runtime as instance pool size grows.
+Tests: 100, 500, 1000, 5000, full pool
+"""
+import sys, os, time
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import pandas as pd
+from preprocessing.feature_engineering import add_features
+from preprocessing.hard_filter import hard_filter
+from scoring.fit_score import add_fit_score
+from optimization.bayesian_ranker import optimize_weights
+from scoring.final_scorer import rank_instances
+from postprocessing.diversify import diversify
+
+REQUIREMENTS = {"required_compute": 16*27000, "memory_gib": 64,
+                "network_mbps": 25000, "max_price": 10.0}
+SIZES = [100, 500, 1000, 5000, None]  # None = full pool
+
+df_raw = add_features(pd.read_csv(
+    "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+))
+pool = hard_filter(df_raw, REQUIREMENTS)
+pool = add_fit_score(pool, REQUIREMENTS)
+print(f"Full pool after hard filter: {len(pool)} instances\n")
+
+records = []
+print(f"{'Instances':>10}  {'Runtime (s)':>12}  {'BO time (s)':>12}")
+print("-" * 40)
+for size in SIZES:
+    subset = pool.sample(n=size, random_state=42) if size else pool.copy()
+
+    t0 = time.perf_counter()
+    t_bo = time.perf_counter()
+    weights = optimize_weights(subset, top_k=10, n_calls=30, random_state=42)
+    bo_time = time.perf_counter() - t_bo
+
+    ranked = rank_instances(subset, weights)
+    diversify(ranked, per_family=2, top_n=10)
+    total = time.perf_counter() - t0
+
+    label = size if size else len(pool)
+    records.append({"Instances": label, "Runtime (s)": round(total, 2),
+                    "BO time (s)": round(bo_time, 2)})
+    print(f"{label:>10}  {total:>12.2f}  {bo_time:>12.2f}")
+
+df_out = pd.DataFrame(records)
+df_out.to_csv(os.path.join(os.path.dirname(__file__), "scalability_results.csv"), index=False)
+print("\nSaved to experiments/scalability_results.csv")
