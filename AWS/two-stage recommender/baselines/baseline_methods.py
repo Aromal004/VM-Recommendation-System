@@ -13,6 +13,8 @@ Micky-like       Greedy multi-armed bandit: pick the instance with best
 
 Each function accepts the same inputs and returns a ranked DataFrame,
 so they can be dropped in wherever rank_instances() is called.
+
+All baselines add a 'final_score' column for compatibility with evaluation metrics.
 """
 
 import numpy as np
@@ -31,7 +33,10 @@ def random_baseline(df: pd.DataFrame, top_n: int = 10,
     Randomly shuffle the candidate pool and return top_n instances.
     Acts as a sanity / lower-bound baseline.
     """
-    return df.sample(frac=1, random_state=seed).head(top_n).copy()
+    result = df.sample(frac=1, random_state=seed).head(top_n).copy()
+    # Add final_score for compatibility with evaluation metrics
+    result["final_score"] = np.random.random(len(result))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +53,7 @@ def heuristic_baseline(df: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
     mem_norm    = df["memory_gib"] / df["memory_gib"].max()
 
     df["heuristic_score"] = (vcpu_norm + mem_norm) / (2 * df["price_per_hr"])
+    df["final_score"] = df["heuristic_score"]  # Add for compatibility
     return df.sort_values("heuristic_score", ascending=False).head(top_n)
 
 
@@ -93,6 +99,7 @@ def cherrypick_baseline(df: pd.DataFrame, top_n: int = 10,
         (w_cost / total) * df["perf_per_dollar"]
         + (w_gen  / total) * df["generation_score"]
     )
+    df["final_score"] = df["cp_score"]  # Add for compatibility
     return df.sort_values("cp_score", ascending=False).head(top_n)
 
 
@@ -140,7 +147,9 @@ def micky_baseline(df: pd.DataFrame, top_n: int = 10,
         reward = df.loc[idx, "perf_per_dollar"]
         df.loc[idx, "arm_estimate"] = reward   # convergence
 
-    return df.loc[selected_indices].copy()
+    result = df.loc[selected_indices].copy()
+    result["final_score"] = result["arm_estimate"]  # Add for compatibility
+    return result
 
 
 # ---------------------------------------------------------------------------

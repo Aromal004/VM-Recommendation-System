@@ -41,7 +41,7 @@ from evaluation.metrics import evaluate_all
 # Config
 # ---------------------------------------------------------------------------
 
-DATA_PATH = "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+DATA_PATH = "combined_vms.csv"
 BASELINE_COREMARK_PER_CORE = 27_000
 
 REQUIREMENTS = {

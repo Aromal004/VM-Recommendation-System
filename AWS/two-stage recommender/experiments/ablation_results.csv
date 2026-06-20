@@ -1,6 +1,3 @@
-Configuration,NDCG@5,Precision@5,Cost savings (%),Right-sizing error,Latency (s)
-Full model,0.8589,0.8,66.5,3.2207,2.95
-No filtering,1.4344,1.0,98.82,52.7753,4.12
-No fit score,1.0,1.0,40.55,6.3696,3.17
-No BO,0.8589,0.8,66.5,3.2207,0.49
-No diversification,1.0,1.0,76.07,1.9062,3.43
+version https://git-lfs.github.com/spec/v1
+oid sha256:38fd1f4531c58b1cd7c6c61c6b1252382a294f52f9e20a1ab454f1d5f443a65e
+size 280

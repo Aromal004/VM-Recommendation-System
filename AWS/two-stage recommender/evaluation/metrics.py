@@ -54,6 +54,14 @@ def compute_relevance(df, req: dict, score_col: str = "final_score") -> np.ndarr
     score_col  : unused (kept for API compatibility); relevance no longer
                  depends on final_score
     """
+    if len(df) == 0:
+        return np.array([])
+    
+    # Ensure fit_score exists; if not, compute it on the fly
+    if "fit_score" not in df.columns:
+        from scoring.fit_score import add_fit_score
+        df = add_fit_score(df.copy(), req)
+    
     # Cost efficiency: lower price is better
     # Threshold = 80th percentile of pool prices (cheaper 80% are "cost-efficient")
     price_threshold = np.percentile(df["price_per_hr"].values, 80)

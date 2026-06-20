@@ -1,1 +1,6 @@
 AWS/two-stage recommender/aws_with_coremark.csv
+AWS/two-stage recommender/combined_vms.csv
+__pycache__/
+data/
+venv/
+combined_vms.csv

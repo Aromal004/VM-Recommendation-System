@@ -18,9 +18,7 @@ REQUIREMENTS = {"required_compute": 16*27000, "memory_gib": 64,
                 "network_mbps": 25000, "max_price": 10.0}
 SIZES = [100, 500, 1000, 5000, None]  # None = full pool
 
-df_raw = add_features(pd.read_csv(
-    "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
-))
+df_raw = add_features(pd.read_csv("combined_vms.csv"))
 pool = hard_filter(df_raw, REQUIREMENTS)
 pool = add_fit_score(pool, REQUIREMENTS)
 print(f"Full pool after hard filter: {len(pool)} instances\n")
@@ -33,7 +31,7 @@ for size in SIZES:
 
     t0 = time.perf_counter()
     t_bo = time.perf_counter()
-    weights = optimize_weights(subset, top_k=10, n_calls=30, random_state=42)
+    weights = optimize_weights(subset, top_k=10, n_calls=30)
     bo_time = time.perf_counter() - t_bo
 
     ranked = rank_instances(subset, weights)

@@ -14,7 +14,7 @@ import numpy as np
 from preprocessing.feature_engineering import add_features
 from preprocessing.hard_filter import hard_filter
 
-DATA_PATH = "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+DATA_PATH = "combined_vms.csv"
 
 REQUIREMENTS_NO_NET = {
     "required_compute": 16 * 27000,

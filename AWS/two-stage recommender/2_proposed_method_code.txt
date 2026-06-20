@@ -1,0 +1,361 @@
+================================================================================
+PROPOSED METHOD CODE
+================================================================================
+This file contains all code for the proposed two-stage recommendation pipeline:
+preprocessing/, scoring/, optimization/, and postprocessing/
+
+================================================================================
+FILE: preprocessing/feature_engineering.py
+================================================================================
+import pandas as pd
+import re
+import numpy as np
+
+
+def parse_network_mbps(val):
+    """
+    Handles all formats in the dataset:
+      'Up to 12500 Megabit'  -> 12500.0
+      '10 Gigabit'           -> 10000.0
+      '150000 Megabit'       -> 150000.0
+    """
+    if pd.isna(val):
+        return 0.0
+    s = str(val).lower()
+    m = re.search(r"([\d\.]+)\s*gigabit", s)
+    if m:
+        return float(m.group(1)) * 1000
+    m = re.search(r"([\d\.]+)\s*megabit", s)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"([\d\.]+)\s*gbps", s)
+    if m:
+        return float(m.group(1)) * 1000
+    m = re.search(r"([\d\.]+)\s*mbps", s)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"([\d\.]+)", s)
+    return float(m.group(1)) if m else 0.0
+
+
+def add_features(df):
+    df = df.copy()
+
+    # Drop rows with no instanceType
+    df = df.dropna(subset=["instanceType"])
+    df["instanceType"] = df["instanceType"].astype(str)
+
+    # Remove invalid pricing
+    df = df[df["price_per_hr"] > 0]
+
+    # Remove inf / missing coremark values
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.dropna(subset=["coremark_total", "coremark_per_dollar"])
+
+    # Core specs
+    df["vcpu"] = df["vcpu"].astype(float)
+
+    df["memory_gib"] = (
+        df["memory"]
+        .str.replace(" GiB", "", regex=False)
+        .astype(float)
+    )
+
+    df["network_mbps"] = df["networkPerformance"].apply(parse_network_mbps)
+
+    # Compute signals
+    df["compute_score"]   = df["coremark_total"]
+    df["perf_per_dollar"] = df["coremark_per_dollar"]
+
+    # Generation score — use coremark_per_core as proxy (newer chips score higher)
+    df["generation_score"] = (
+        df["coremark_per_core"] / df["coremark_per_core"].max()
+    )
+
+    # Instance family
+    df["family"] = df["instanceType"].str.split(".").str[0]
+
+    return df
+================================================================================
+FILE: preprocessing/hard_filter.py
+================================================================================
+def hard_filter(df, req):
+    df = df.copy()
+
+    df = df[df["compute_score"] >= req["required_compute"]]
+    df = df[df["memory_gib"]    >= req["memory_gib"]]
+
+    # Only apply network filter if a real requirement exists
+    if req.get("network_mbps", 0) > 0:
+        df = df[df["network_mbps"] >= req["network_mbps"]]
+
+    if "max_price" in req and req["max_price"] > 0:
+        df = df[df["price_per_hr"] <= req["max_price"]]
+
+    return df
+================================================================================
+FILE: scoring/fit_score.py
+================================================================================
+import numpy as np
+
+def add_fit_score(df, req):
+    df = df.copy()
+
+    # Oversize ratio — how many times larger than needed (0 = exact fit)
+    compute_ratio = (
+        (df["compute_score"] - req["required_compute"]) / req["required_compute"]
+    ).clip(lower=0)
+
+    mem_ratio = (
+        (df["memory_gib"] - req["memory_gib"]) / req["memory_gib"]
+    ).clip(lower=0)
+
+    if req.get("network_mbps", 0) > 0:
+        net_ratio = (
+            (df["network_mbps"] - req["network_mbps"]) / req["network_mbps"]
+        ).clip(lower=0)
+    else:
+        net_ratio = 0
+
+    # Squared penalty: a VM 10x oversized gets penalised far more than 2x oversized.
+    # This collapses the score of M192 (47x oversized compute) to near-zero
+    # even before cost/generation weights come into play.
+    penalty = compute_ratio**2 + mem_ratio**2 + (net_ratio**2 if not isinstance(net_ratio, int) else 0)
+
+    df["fit_score"] = 1 / (1 + penalty)
+
+    return df
+================================================================================
+FILE: scoring/final_scorer.py
+================================================================================
+import pandas as pd
+
+def _minmax(series: pd.Series) -> pd.Series:
+    lo, hi = series.min(), series.max()
+    if hi == lo:
+        return pd.Series(1.0, index=series.index)
+    return (series - lo) / (hi - lo)
+
+def rank_instances(df, weights):
+    df = df.copy()
+
+    # Normalise each signal to [0, 1] so no single column dominates
+    # purely because of its unit magnitude (e.g. perf_per_dollar >> fit_score)
+    fit_norm   = _minmax(df["fit_score"])
+    cost_norm  = _minmax(df["perf_per_dollar"])
+    gen_norm   = _minmax(df["generation_score"])
+
+    df["final_score"] = (
+        weights["fit"]        * fit_norm
+        + weights["cost"]     * cost_norm
+        + weights["generation"] * gen_norm
+    )
+
+    return df.sort_values("final_score", ascending=False)
+================================================================================
+FILE: optimization/bayesian_ranker.py
+================================================================================
+from skopt import gp_minimize
+from skopt.space import Real
+import pandas as pd
+
+
+def _minmax(series: pd.Series) -> pd.Series:
+    lo, hi = series.min(), series.max()
+    if hi == lo:
+        return pd.Series(1.0, index=series.index)
+    return (series - lo) / (hi - lo)
+
+
+def optimize_weights(df, top_k=10, n_calls=30, random_state=42):
+    # Normalise signals once so the objective sees balanced scales
+    fit_n  = _minmax(df["fit_score"]).values
+    cost_n = _minmax(df["perf_per_dollar"]).values
+    gen_n  = _minmax(df["generation_score"]).values
+
+    space = [
+        Real(0.3, 0.7, name="fit"),
+        Real(0.1, 0.4, name="cost"),
+        Real(0.05, 0.2, name="generation"),
+    ]
+
+    def objective(params):
+        w = dict(zip(["fit", "cost", "generation"], params))
+        s = sum(w.values())
+        w = {k: v / s for k, v in w.items()}
+
+        scores = w["fit"] * fit_n + w["cost"] * cost_n + w["generation"] * gen_n
+        top_scores = sorted(scores, reverse=True)[:top_k]
+        return -sum(top_scores) / len(top_scores)
+
+    res = gp_minimize(objective, space, n_calls=n_calls, random_state=random_state)
+
+    weights = dict(zip(["fit", "cost", "generation"], res.x))
+    s = sum(weights.values())
+    return {k: v / s for k, v in weights.items()}
+================================================================================
+FILE: postprocessing/diversify.py
+================================================================================
+import math
+import re
+import pandas as pd
+
+
+def _family_key(row) -> str:
+    provider = row["provider"].lower()
+    itype    = row["instanceType"]
+
+    if provider == "aws":
+        return f"aws:{itype.split('.')[0]}"
+
+    if provider == "azure":
+        m = re.match(r"([A-Za-z_]+)", itype)
+        prefix = m.group(1).rstrip("_") if m else itype[:8]
+        return f"azure:{prefix}"
+
+    if provider == "gcp":
+        return f"gcp:{itype.split('-')[0]}"
+
+    return f"{provider}:{itype[:8]}"
+
+
+def diversify(df: pd.DataFrame, per_family: int = 2, top_n: int = 10) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    # ── Deduplicate: keep only the highest-scored row per instanceType ──
+    df = (
+        df.sort_values("final_score", ascending=False)
+          .drop_duplicates(subset=["instanceType"], keep="first")
+    )
+
+    providers    = df["provider"].unique().tolist()
+    n_providers  = len(providers)
+    per_provider = max(1, math.floor(top_n / n_providers))
+
+    result_idx  = []
+    fam_counts  = {}
+    prov_counts = {p: 0 for p in providers}
+
+    # Pass 1 — guaranteed quota per provider
+    for provider in providers:
+        for idx, row in df[df["provider"] == provider].iterrows():
+            if prov_counts[provider] >= per_provider:
+                break
+            k = _family_key(row)
+            fam_counts.setdefault(k, 0)
+            if fam_counts[k] < per_family:
+                result_idx.append(idx)
+                fam_counts[k] += 1
+                prov_counts[provider] += 1
+
+    # Pass 2 — fill remaining slots in global score order
+    for idx, row in df.iterrows():
+        if len(result_idx) >= top_n:
+            break
+        if idx in result_idx:
+            continue
+        k = _family_key(row)
+        fam_counts.setdefault(k, 0)
+        if fam_counts[k] < per_family:
+            result_idx.append(idx)
+            fam_counts[k] += 1
+
+    return df.loc[result_idx]
+
+================================================================================
+FILE: main.py
+================================================================================
+import pandas as pd
+import boto3
+
+from preprocessing.feature_engineering import add_features
+from preprocessing.hard_filter         import hard_filter
+from scoring.fit_score                 import add_fit_score
+from optimization.bayesian_ranker      import optimize_weights
+from scoring.final_scorer              import rank_instances
+from postprocessing.diversify          import diversify
+
+S3_BUCKET = "vm-recommendation-data"
+S3_KEY    = "combined_vms.csv"
+
+
+def load_dataset() -> pd.DataFrame:
+    s3  = boto3.client("s3")
+    obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_KEY)
+    return pd.read_csv(obj["Body"])
+
+
+def _sanitise(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop rows with obviously bad pricing data.
+    A real VM costs at least $0.01/hr; anything below that is a dataset
+    artefact (e.g. the $0.002 Azure M192 rows) that explodes perf_per_dollar.
+    """
+    return df[df["price_per_hr"] >= 0.01].copy()
+
+
+def run_recommendation(requirements: dict) -> list[dict] | dict:
+    df = load_dataset()
+
+    df = add_features(df)
+    if df.empty:
+        return {"error": "Dataset empty after feature engineering"}
+
+    df = _sanitise(df)          # ← remove price outliers before scoring
+    if df.empty:
+        return {"error": "Dataset empty after price sanity filter"}
+
+    df = hard_filter(df, requirements)
+    if df.empty:
+        return {"error": "No instances satisfy constraints"}
+
+    df      = add_fit_score(df, requirements)
+    weights = optimize_weights(df)
+    ranked  = rank_instances(df, weights)
+    final   = diversify(ranked, per_family=2, top_n=10)
+
+    return final[[
+        "provider",
+        "instanceType",
+        "physicalProcessor",
+        "vcpu",
+        "compute_score",
+        "memory_gib",
+        "network_mbps",
+        "price_per_hr",
+        "perf_per_dollar",
+        "final_score",
+    ]].to_dict(orient="records")
+================================================================================
+FILE: lambda_handler.py
+================================================================================
+from main import run_recommendation
+
+# Baseline CoreMark score per core used to translate a vCPU requirement
+# into an absolute compute score the ranker can filter on.
+BASELINE_COREMARK_PER_CORE = 27000
+
+
+def lambda_handler(event, context):
+
+    vcpu         = event["vcpu"]
+    memory_gib   = event["memory_gib"]
+    network_mbps = event["network_mbps"]
+    max_price    = event.get("max_price", 10.0)
+
+    required_compute = vcpu * BASELINE_COREMARK_PER_CORE
+
+    requirements = {
+        "required_compute": required_compute,
+        "memory_gib":       memory_gib,
+        "network_mbps":     network_mbps,
+        "max_price":        max_price,
+    }
+
+    results = run_recommendation(requirements)
+
+    # run_recommendation returns either a list of dicts (success) or a
+    # single dict with an "error" key.  Pass both through unchanged so
+    # the Step Functions state machine can surface errors cleanly.
+    return {"recommended_instances": results}

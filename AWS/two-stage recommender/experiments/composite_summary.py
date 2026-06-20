@@ -81,8 +81,8 @@ REQUIREMENTS = {"required_compute": 16*27000, "memory_gib": 64,
 
 df_raw  = add_features(pd.read_csv(
     next(p for p in [
+        "combined_vms.csv",
         "aws_with_coremark.csv",
-        "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
     ] if os.path.exists(p))
 ))
 pool    = hard_filter(df_raw, REQUIREMENTS)
@@ -90,7 +90,7 @@ pool    = add_fit_score(pool, REQUIREMENTS)
 eq_w    = {"fit": 1/3, "cost": 1/3, "generation": 1/3}
 pool_r  = rank_instances(pool, eq_w)
 
-weights  = optimize_weights(pool, top_k=10, n_calls=30, random_state=42)
+weights  = optimize_weights(pool, top_k=10, n_calls=30)
 ranked   = rank_instances(pool, weights)
 proposed = diversify(ranked, per_family=2, top_n=10)
 bases    = run_all_baselines(pool_r, top_n=10, seed=42)

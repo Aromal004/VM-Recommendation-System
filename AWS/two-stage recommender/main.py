@@ -1,74 +1,61 @@
-# main.py  (updated — adds independent evaluation metrics)
 import pandas as pd
+import boto3
 
 from preprocessing.feature_engineering import add_features
-from preprocessing.hard_filter import hard_filter
-from scoring.fit_score import add_fit_score
-from optimization.bayesian_ranker import optimize_weights
-from scoring.final_scorer import rank_instances
-from postprocessing.diversify import diversify
-from evaluation.metrics import evaluate_all          # NEW
+from preprocessing.hard_filter         import hard_filter
+from scoring.fit_score                 import add_fit_score
+from optimization.bayesian_ranker      import optimize_weights
+from scoring.final_scorer              import rank_instances
+from postprocessing.diversify          import diversify
 
-# Load dataset
-df = pd.read_csv("/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv")
+S3_BUCKET = "vm-recommendation-data"
+S3_KEY    = "combined_vms.csv"
 
-# Feature engineering
-df = add_features(df)
 
-# Baseline compute per core (median approx)
-baseline_coremark_per_core = 27000
+def load_dataset() -> pd.DataFrame:
+    s3  = boto3.client("s3")
+    obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_KEY)
+    return pd.read_csv(obj["Body"])
 
-# Workload requirements
-requirements = {
-    "required_compute": 16 * baseline_coremark_per_core,
-    "memory_gib": 64,
-    "network_mbps": 25000,
-    "max_price": 10.0
-}
 
-# Stage 1 – Hard filter
-df = hard_filter(df, requirements)
+def _sanitise(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop rows with obviously bad pricing data.
+    A real VM costs at least $0.01/hr; anything below that is a dataset
+    artefact (e.g. the $0.002 Azure M192 rows) that explodes perf_per_dollar.
+    """
+    return df[df["price_per_hr"] >= 0.01].copy()
 
-if df.empty:
-    raise ValueError("No instances satisfy hard constraints")
 
-# Stage 2 – Fit scoring
-df = add_fit_score(df, requirements)
+def run_recommendation(requirements: dict) -> list[dict] | dict:
+    df = load_dataset()
 
-# Keep a reference to the full scored pool for NDCG ideal baseline  # NEW
-scored_pool = df.copy()                                               # NEW
+    df = add_features(df)
+    if df.empty:
+        return {"error": "Dataset empty after feature engineering"}
 
-# Stage 3 – Bayesian weight optimization
-weights = optimize_weights(df)
-print("\nOptimized Weights:", weights)
+    df = _sanitise(df)          # ← remove price outliers before scoring
+    if df.empty:
+        return {"error": "Dataset empty after price sanity filter"}
 
-# Stage 4 – Final ranking
-ranked = rank_instances(df, weights)
+    df = hard_filter(df, requirements)
+    if df.empty:
+        return {"error": "No instances satisfy constraints"}
 
-# Stage 5 – Diversification
-final = diversify(ranked, per_family=2, top_n=10)
+    df      = add_fit_score(df, requirements)
+    weights = optimize_weights(df)
+    ranked  = rank_instances(df, weights)
+    final   = diversify(ranked, per_family=2, top_n=10)
 
-print("\n🏆 FINAL EC2 RECOMMENDATIONS\n")
-print(
-    final[
-        [
-            "instanceType",
-            "physicalProcessor",
-            "vcpu",
-            "compute_score",
-            "memory_gib",
-            "network_mbps",
-            "price_per_hr",
-            "perf_per_dollar",
-            "final_score"
-        ]
-    ]
-)
-
-# Stage 6 – Independent evaluation metrics                           # NEW
-metrics = evaluate_all(final, scored_pool, requirements, k=5)        # NEW
-print("\n📊 INDEPENDENT EVALUATION METRICS")                         # NEW
-print(f"  NDCG@5              : {metrics['ndcg_at_k']}")             # NEW
-print(f"  Precision@5         : {metrics['precision_at_k']}")        # NEW
-print(f"  Cost savings (%)    : {metrics['cost_savings_pct']}%")     # NEW
-print(f"  Right-sizing error  : {metrics['right_sizing_error']}")    # NEW
+    return final[[
+        "provider",
+        "instanceType",
+        "physicalProcessor",
+        "vcpu",
+        "compute_score",
+        "memory_gib",
+        "network_mbps",
+        "price_per_hr",
+        "perf_per_dollar",
+        "final_score",
+    ]].to_dict(orient="records")

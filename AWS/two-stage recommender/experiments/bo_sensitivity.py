@@ -41,7 +41,7 @@ from evaluation.metrics import evaluate_all
 # Config
 # ---------------------------------------------------------------------------
 
-DATA_PATH = "/home/aromal/VM-Recommendation-System/AWS/two-stage recommender/aws_with_coremark.csv"
+DATA_PATH = "combined_vms.csv"
 BASELINE_COREMARK_PER_CORE = 27_000
 
 REQUIREMENTS = {
@@ -54,7 +54,7 @@ REQUIREMENTS = {
 TOP_K = 10
 EVAL_K = 5
 
-ITERATION_GRID = [5, 10, 20, 30, 45, 60]
+ITERATION_GRID = [10, 15, 20, 30, 45, 60] 
 SEED_GRID      = list(range(10))
 FIXED_CALLS    = 30
 
