@@ -243,7 +243,7 @@ graph LR
 | **Production Ready** | ❌ | ❌ | ✅ Filtering | ⚠️ Lambda-ready | ✅ Full pipeline |
 | **Web Interface** | ❌ | ❌ | ❌ | ❌ | ✅ S3 static site |
 | **A/B Testing** | ❌ | ❌ | ❌ | ❌ | ✅ Multi-endpoint |
-| **Documentation** | ✅ 358 lines | ✅ 435 lines | ✅ 505 lines | ✅ 428 lines | ✅ 208 lines |
+
 
 ## 🚦 Quick Start
 
@@ -381,31 +381,31 @@ Dataset location: `s3://vm-recommendation-data/combined_vms.csv` or `aws_with_co
 
 ## 📚 Detailed Documentation
 
-- **First System (Rule-Based)**: [AWS/First system/README.md](AWS/First%20system/README.md) (358 lines)
+- **First System (Rule-Based)**: [AWS/First system/README.md](AWS/First%20system/README.md)
   - Performance-to-power ratio (PPR) scoring
   - Energy and performance modeling
   - Fixed weight configuration
   - Workload profiles and usage examples
 
-- **Bayesian Optimization System**: [AWS/Bayesian/README.md](AWS/Bayesian/README.md) (435 lines)
+- **Bayesian Optimization System**: [AWS/Bayesian/README.md](AWS/Bayesian/README.md)
   - Bayesian optimization algorithm details
   - Weight learning process
   - Workload-specific constraints
   - Normalization and feature engineering
 
-- **Alternative Implementation**: [AWS/vm-recommendation-system/README.md](AWS/vm-recommendation-system/README.md) (505 lines)
+- **Alternative Implementation**: [AWS/vm-recommendation-system/README.md](AWS/vm-recommendation-system/README.md)
   - Comprehensive filtering (region, OS, tenancy, GPU)
   - Current generation focus
   - Production-oriented features
   - Budget-aware recommendations
 
-- **Two-Stage Recommender**: [AWS/two-stage recommender/README.md](AWS/two-stage%20recommender/README.md) (428 lines)
+- **Two-Stage Recommender**: [AWS/two-stage recommender/README.md](AWS/two-stage%20recommender/README.md)
   - Algorithm details (intent derivation, BO objective)
   - Evaluation metrics (RSE, diversity, cost efficiency)
   - Experiment results (ablation studies, baseline comparisons)
   - Design rationale (why two stages, why squared penalties)
   
-- **Production Pipeline**: [vm-recommender-pipeline/readme.md](vm-recommender-pipeline/readme.md) (208 lines)
+- **Production Pipeline**: [vm-recommender-pipeline/readme.md](vm-recommender-pipeline/readme.md)
   - AWS architecture and services
   - Deployment guide
   - API usage examples
